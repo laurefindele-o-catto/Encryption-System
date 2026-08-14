@@ -1,58 +1,122 @@
-from fastapi import HTTPException, UploadFile
+"""
+Orchestration layer for /api/encrypt, /api/decrypt, and /api/base-image.
 
-from schemas.image_schema import ImageResponse
-from services.crypto import decrypt_image, encrypt_image
-from services.image_utils import array_to_base64, file_to_array
-from services.state import state
+The controller is intentionally thin: it does file I/O, calls the pure
+DRPE service, manages the in-memory message store, and shapes the
+response. All real logic lives in services/.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from fastapi import Form, HTTPException, UploadFile
+
+from schemas.image_schema import (
+    BaseImageResponse,
+    DecryptResponse,
+    EncryptResponse,
+)
+from services.base_image import get_base_image
+from services.drpe import (
+    drpe_decrypt,
+    drpe_encrypt,
+    energy,
+)
+from services.image_utils import (
+    array_to_base64,
+    b64_to_complex,
+    complex_to_b64,
+    file_to_array,
+)
 
 
-async def encrypt_controller(cover_image: UploadFile, key_image: UploadFile, x: int, y: int) -> ImageResponse:
+# Cover image is the *last* one we encrypted, kept for the "match with
+# cover" readout. Resets on every /api/encrypt call.
+_last_cover: np.ndarray | None = None
+
+
+async def encrypt_controller(
+    cover_image: UploadFile,
+    seed_p1: str = Form(...),
+    seed_p2: str = Form(...),
+) -> EncryptResponse:
     """
-    Sender side. Reads the two uploaded images, stores everything in
-    state, runs encrypt_image(), and returns the encrypted image.
+    Sender side. Reads the cover image, runs DRPE with the
+    predetermined base image + dual seeds (seed_p1, seed_p2),
+    and returns the complex ciphertext payload + amplitude display image.
     """
-    cover_arr = await file_to_array(cover_image)
-    key_arr = await file_to_array(key_image)
-    coord = (x, y)
+    global _last_cover
 
-    state["cover_image"] = cover_arr
-    state["key_image"] = key_arr
-    state["coord"] = coord
+    base = get_base_image()
+    try:
+        cover_arr = await file_to_array(cover_image, target_shape=None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        encrypted = encrypt_image(cover_arr, key_arr, coord)
+        out = drpe_encrypt(cover_arr, base, seed_p1, seed_p2, frame_index=0)
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
-    state["encrypted_image"] = encrypted
-    return ImageResponse(image=array_to_base64(encrypted))
+    _last_cover = cover_arr
+
+    c_complex = out["complex"]
+    return EncryptResponse(
+        ciphertext_b64=complex_to_b64(c_complex),
+        ciphertext_shape=list(c_complex.shape),
+        image=array_to_base64(out["amplitude"]),
+        energy=energy(out["amplitude"]),
+        cover_energy=energy(cover_arr),
+    )
 
 
-def get_encrypted_image_controller() -> ImageResponse:
+async def decrypt_controller(
+    ciphertext_b64: str = Form(...),
+    ciphertext_height: int = Form(...),
+    ciphertext_width: int = Form(...),
+    seed_p1: str = Form(...),
+    seed_p2: str = Form(...),
+) -> DecryptResponse:
     """
-    Receiver side. Returns whatever encrypted image is currently sitting
-    in state, as if it had just arrived over the wire.
+    Receiver side. Decodes the complex ciphertext payload, re-derives
+    phase masks from the provided dual seeds (seed_p1, seed_p2), and inverts.
+    A wrong seed dynamically recovers the exact phase noise corresponding to that key.
     """
-    if state["encrypted_image"] is None:
-        raise HTTPException(status_code=404, detail="No encrypted image available yet")
-    return ImageResponse(image=array_to_base64(state["encrypted_image"]))
-
-
-async def decrypt_controller(key_image: UploadFile) -> ImageResponse:
-    """
-    Receiver side. Combines the uploaded key image with whatever
-    encrypted image + coord is currently in state, and returns the
-    recovered original image.
-    """
-    if state["encrypted_image"] is None or state["coord"] is None:
-        raise HTTPException(status_code=400, detail="No encrypted image to decrypt yet")
-
-    key_arr = await file_to_array(key_image)
+    base = get_base_image()
+    try:
+        ciphertext_complex = b64_to_complex(
+            ciphertext_b64, (ciphertext_height, ciphertext_width)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid ciphertext payload: {e}")
 
     try:
-        decrypted = decrypt_image(state["encrypted_image"], key_arr, state["coord"])
+        recovered = drpe_decrypt(
+            ciphertext_complex=ciphertext_complex,
+            base_image=base,
+            seed_p1=seed_p1,
+            seed_p2=seed_p2,
+            frame_index=0,
+        )
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
-    state["decrypted_image"] = decrypted
-    return ImageResponse(image=array_to_base64(decrypted))
+    match = False
+    if _last_cover is not None and _last_cover.shape == recovered.shape:
+        # Same-seed decrypt matches original cover exactly with zero pixel error (atol=1e-15).
+        match = bool(np.allclose(_last_cover, recovered, atol=1e-15))
+
+    return DecryptResponse(
+        image=array_to_base64(recovered),
+        energy=energy(recovered),
+        match_with_cover=match,
+    )
+
+
+def get_base_image_controller() -> BaseImageResponse:
+    """Returns the predetermined base image so the demo can show it."""
+    base = get_base_image()
+    return BaseImageResponse(
+        image=array_to_base64(base),
+        shape=list(base.shape),
+    )

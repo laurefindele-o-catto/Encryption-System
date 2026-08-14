@@ -1,0 +1,14 @@
+# Python cache & build files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local environment / data files
+backend/data/
+backend/run_code.txt
+.env
+
+# Frontend / node_modules (to keep ignored for now)
+frontend/
+node_modules/
+dist/
