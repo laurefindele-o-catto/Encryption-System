@@ -31,7 +31,7 @@ from services.keys import derive_key
 
 # --- Mask generation -------------------------------------------------------
 
-def _shape_seed(base_image: np.ndarray, frame_index: int, shape: tuple[int, int] | None = None) -> bytes:
+def _shape_seed(base_image: np.ndarray, frame_index: int, shape: tuple[int, ...] | None = None) -> bytes:
     """
     A base-image-aware seed blob. We hash the base image and target shape so that two
     different base images or shapes with the same input seed produce different phase masks.
@@ -42,7 +42,7 @@ def _shape_seed(base_image: np.ndarray, frame_index: int, shape: tuple[int, int]
 
 
 def generate_phase_masks(
-    shape: tuple[int, int],
+    shape: tuple[int, ...],
     base_image: np.ndarray,
     seed_p1: str,
     seed_p2: str,
@@ -51,7 +51,7 @@ def generate_phase_masks(
     """
     Deterministically generate P1 and P2 given a (base image, seed_p1, seed_p2, frame index).
 
-    Both masks are uniform in [0, 2π) and shape-matched to the cover image.
+    Both masks are uniform in [0, 2π) and shape-matched to the cover image (RGB or grayscale).
     P1 is derived from seed_p1 (applied in spatial domain before FFT).
     P2 is derived from seed_p2 (applied in frequency domain after FFT).
 
@@ -86,11 +86,11 @@ def drpe_encrypt(
     frame_index: int = 0,
 ) -> dict:
     """
-    Encrypt a grayscale cover image using DRPE with dual seeds (seed_p1, seed_p2).
+    Encrypt an RGB or grayscale cover image using DRPE with dual seeds (seed_p1, seed_p2).
 
     Args:
-        cover_image: 2D float64 ndarray — the image to encrypt.
-        base_image:  2D float64 ndarray — the predetermined base/reference image
+        cover_image: float64 ndarray — the image to encrypt (RGB shape (H, W, 3) or 2D (H, W)).
+        base_image:  float64 ndarray — the predetermined base/reference image
                      (used as part of key derivation).
         seed_p1:     str — seed for spatial domain phase mask P1.
         seed_p2:     str — seed for frequency domain phase mask P2.
@@ -107,12 +107,12 @@ def drpe_encrypt(
 
     # 1. Apply spatial phase mask P1 to cover image (complex rotation in spatial domain)
     cover_spatial = cover_image * np.exp(1j * p1)
-    # 2. Fourier transform to frequency domain
-    g = np.fft.fft2(cover_spatial)
+    # 2. 2D Fourier transform to frequency domain across spatial dimensions
+    g = np.fft.fft2(cover_spatial, axes=(0, 1))
     # 3. Apply frequency phase mask P2 (complex rotation in Fourier plane)
     g_prime = g * np.exp(1j * p2)
-    # 4. Inverse Fourier transform back to spatial domain -> complex ciphertext c
-    c = np.fft.ifft2(g_prime)
+    # 4. 2D Inverse Fourier transform back to spatial domain -> complex ciphertext c
+    c = np.fft.ifft2(g_prime, axes=(0, 1))
 
     return {
         "complex": c.astype(np.complex128),
@@ -124,32 +124,29 @@ def drpe_encrypt(
 
 def drpe_decrypt(
     ciphertext_complex: np.ndarray,
-    base_image: np.ndarray,
-    seed_p1: str,
-    seed_p2: str,
-    frame_index: int = 0,
+    p1: np.ndarray,
+    p2: np.ndarray,
 ) -> np.ndarray:
     """
-    Reverse drpe_encrypt() given the COMPLEX ciphertext and the dual keys (seed_p1, seed_p2).
+    Reverse drpe_encrypt() given the COMPLEX ciphertext and the phase masks (p1, p2).
+
+    P1 and P2 come directly from the caller (frontend) as float64 arrays without
+    being regenerated inside drpe.py.
 
     Args:
         ciphertext_complex: complex128 ndarray from drpe_encrypt()["complex"].
-        base_image:  2D float64 — the same base image used at encryption.
-        seed_p1:     str — seed for phase mask P1.
-        seed_p2:     str — seed for phase mask P2.
-        frame_index: int — same frame index.
+        p1: float64 ndarray — spatial domain phase mask P1.
+        p2: float64 ndarray — frequency domain phase mask P2.
 
     Returns:
-        2D float64 — the recovered cover image.
+        float64 ndarray — the recovered cover image.
     """
-    p1, p2 = generate_phase_masks(ciphertext_complex.shape, base_image, seed_p1, seed_p2, frame_index)
-
-    # 1. Fourier transform of complex ciphertext
-    g_prime = np.fft.fft2(ciphertext_complex)
+    # 1. 2D Fourier transform of complex ciphertext (spatial -> frequency)
+    g_prime = np.fft.fft2(ciphertext_complex, axes=(0, 1))
     # 2. Remove frequency phase mask P2
     g = g_prime * np.exp(-1j * p2)
-    # 3. Inverse Fourier transform to spatial domain
-    cover_spatial = np.fft.ifft2(g)
+    # 3. 2D Inverse Fourier transform to spatial domain
+    cover_spatial = np.fft.ifft2(g, axes=(0, 1))
     # 4. Remove spatial phase mask P1 and extract real component
     cover = cover_spatial * np.exp(-1j * p1)
 
@@ -163,3 +160,4 @@ def energy(image: np.ndarray) -> float:
     Useful as a sanity-check readout in the demo.
     """
     return float(np.sum(image.astype(np.float64) ** 2))
+

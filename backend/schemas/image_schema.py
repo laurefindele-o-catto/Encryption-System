@@ -13,7 +13,9 @@ class ImageResponse(BaseModel):
 class EncryptResponse(BaseModel):
     """Returned by POST /api/encrypt."""
     ciphertext_b64: str  # Lossless base64-encoded complex128 array
-    ciphertext_shape: list[int]  # [height, width]
+    ciphertext_shape: list[int]  # [height, width, channels] or [height, width]
+    p1_b64: str          # Lossless base64-encoded float64 P1 mask
+    p2_b64: str          # Lossless base64-encoded float64 P2 mask
     image: str          # base64-encoded PNG of |ciphertext| (display image)
     energy: float       # Σ(pixel²) over the displayed amplitude
     cover_energy: float  # Σ(pixel²) over the original cover (for Parseval readout)
@@ -22,10 +24,11 @@ class EncryptResponse(BaseModel):
 class DecryptRequest(BaseModel):
     """Payload sent to POST /api/decrypt."""
     ciphertext_b64: str
-    ciphertext_height: int
-    ciphertext_width: int
-    seed_p1: str
-    seed_p2: str
+    ciphertext_shape: list[int]
+    seed_p1: str | None = None
+    seed_p2: str | None = None
+    p1_b64: str | None = None
+    p2_b64: str | None = None
 
 
 class DecryptResponse(BaseModel):
@@ -38,4 +41,5 @@ class DecryptResponse(BaseModel):
 class BaseImageResponse(BaseModel):
     """Returned by GET /api/base-image."""
     image: str          # base64-encoded PNG of the predetermined base image
-    shape: list[int]    # [height, width]
+    shape: list[int]    # [height, width, channels]
+

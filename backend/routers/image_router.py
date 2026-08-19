@@ -37,12 +37,17 @@ async def encrypt(
 @router.post("/decrypt", response_model=DecryptResponse)
 async def decrypt(req: DecryptRequest) -> DecryptResponse:
     """
-    Decrypt the complex ciphertext payload using user-provided `seed_p1` and `seed_p2`.
-    Stateless endpoint: user inputs any seeds to see the corresponding decrypted output.
+    Decrypt the complex ciphertext payload using user-provided seeds or phase masks.
     """
     return await decrypt_controller(
-        req.ciphertext_b64, req.ciphertext_height, req.ciphertext_width, req.seed_p1, req.seed_p2
+        req.ciphertext_b64,
+        req.ciphertext_shape,
+        p1_b64=req.p1_b64,
+        p2_b64=req.p2_b64,
+        seed_p1=req.seed_p1,
+        seed_p2=req.seed_p2,
     )
+
 
 
 @router.get("/base-image", response_model=BaseImageResponse)

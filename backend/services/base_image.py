@@ -34,13 +34,13 @@ _cached: np.ndarray | None = None
 
 def _load_or_synthesize() -> np.ndarray:
     if os.path.exists(BASE_IMAGE_PATH):
-        img = Image.open(BASE_IMAGE_PATH).convert("L")
+        img = Image.open(BASE_IMAGE_PATH).convert("RGB")
         return np.array(img, dtype=np.float64)
 
     # Synthesize a deterministic noise pattern; write it to disk so the
     # next process boot sees the same bytes.
     rng = np.random.default_rng(_SYNTH_SEED)
-    arr = rng.uniform(0, 255, size=(DEFAULT_BASE_IMAGE_SIZE, DEFAULT_BASE_IMAGE_SIZE))
+    arr = rng.uniform(0, 255, size=(DEFAULT_BASE_IMAGE_SIZE, DEFAULT_BASE_IMAGE_SIZE, 3))
     os.makedirs(os.path.dirname(BASE_IMAGE_PATH), exist_ok=True)
     Image.fromarray(arr.astype(np.uint8)).save(BASE_IMAGE_PATH, format="PNG")
     return arr
@@ -48,7 +48,7 @@ def _load_or_synthesize() -> np.ndarray:
 
 def get_base_image() -> np.ndarray:
     """
-    Return the cached 2D float64 grayscale base image.
+    Return the cached float64 RGB base image.
     """
     global _cached
     if _cached is None:
@@ -56,5 +56,6 @@ def get_base_image() -> np.ndarray:
     return _cached
 
 
-def base_image_shape() -> tuple[int, int]:
+def base_image_shape() -> tuple[int, ...]:
     return get_base_image().shape
+

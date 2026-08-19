@@ -8,17 +8,17 @@ from PIL import Image
 
 async def file_to_array(
     upload: UploadFile,
-    target_shape: tuple[int, int] | None = None,
+    target_shape: tuple[int, ...] | None = None,
 ) -> np.ndarray:
     """
-    Read an uploaded image file into a 2D grayscale numpy array.
+    Read an uploaded image file into an RGB numpy array (float64, shape (H, W, 3)).
     If target_shape (height, width) is provided, resize the image to match.
     """
     raw = await upload.read()
     if not raw or len(raw) < 8:
         raise ValueError("Uploaded file is empty or corrupted.")
     try:
-        img = Image.open(io.BytesIO(raw)).convert("L") # if wanna use RGB instead of grayscale, change "L" to "RGB"
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as e:
         raise ValueError(f"Invalid image format: {e}")
 
@@ -29,7 +29,7 @@ async def file_to_array(
 
 
 def array_to_base64(arr: np.ndarray) -> str:
-    """Turn a 2D numpy array back into a base64-encoded PNG string."""
+    """Turn a numpy array (RGB or grayscale) back into a base64-encoded PNG string."""
     clipped = np.clip(np.round(arr), 0, 255).astype(np.uint8)
     img = Image.fromarray(clipped)
     buf = io.BytesIO()
@@ -42,8 +42,20 @@ def complex_to_b64(c: np.ndarray) -> str:
     return base64.b64encode(c.astype(np.complex128).tobytes()).decode("utf-8")
 
 
-def b64_to_complex(b64_str: str, shape: tuple[int, int]) -> np.ndarray:
-    """Losslessly decode a base64 string back into a 2D complex128 numpy array."""
+def b64_to_complex(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
+    """Losslessly decode a base64 string back into a complex128 numpy array."""
     raw_bytes = base64.b64decode(b64_str)
-    return np.frombuffer(raw_bytes, dtype=np.complex128).reshape(shape)
+    return np.frombuffer(raw_bytes, dtype=np.complex128).reshape(tuple(shape))
+
+
+def float_to_b64(arr: np.ndarray) -> str:
+    """Losslessly encode a float64 numpy array (e.g., P1 or P2 mask) to a base64 string."""
+    return base64.b64encode(arr.astype(np.float64).tobytes()).decode("utf-8")
+
+
+def b64_to_float(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
+    """Losslessly decode a base64 string back into a float64 numpy array."""
+    raw_bytes = base64.b64decode(b64_str)
+    return np.frombuffer(raw_bytes, dtype=np.float64).reshape(tuple(shape))
+
 

@@ -21,12 +21,15 @@ from services.drpe import (
     drpe_decrypt,
     drpe_encrypt,
     energy,
+    generate_phase_masks,
 )
 from services.image_utils import (
     array_to_base64,
     b64_to_complex,
+    b64_to_float,
     complex_to_b64,
     file_to_array,
+    float_to_b64,
 )
 
 
@@ -43,7 +46,7 @@ async def encrypt_controller(
     """
     Sender side. Reads the cover image, runs DRPE with the
     predetermined base image + dual seeds (seed_p1, seed_p2),
-    and returns the complex ciphertext payload + amplitude display image.
+    and returns the complex ciphertext payload, phase masks P1/P2, and display image.
     """
     global _last_cover
 
@@ -64,6 +67,8 @@ async def encrypt_controller(
     return EncryptResponse(
         ciphertext_b64=complex_to_b64(c_complex),
         ciphertext_shape=list(c_complex.shape),
+        p1_b64=float_to_b64(out["p1"]),
+        p2_b64=float_to_b64(out["p2"]),
         image=array_to_base64(out["amplitude"]),
         energy=energy(out["amplitude"]),
         cover_energy=energy(cover_arr),
@@ -71,39 +76,42 @@ async def encrypt_controller(
 
 
 async def decrypt_controller(
-    ciphertext_b64: str = Form(...),
-    ciphertext_height: int = Form(...),
-    ciphertext_width: int = Form(...),
-    seed_p1: str = Form(...),
-    seed_p2: str = Form(...),
+    ciphertext_b64: str,
+    ciphertext_shape: list[int],
+    p1_b64: str | None = None,
+    p2_b64: str | None = None,
+    seed_p1: str | None = None,
+    seed_p2: str | None = None,
 ) -> DecryptResponse:
     """
-    Receiver side. Decodes the complex ciphertext payload, re-derives
-    phase masks from the provided dual seeds (seed_p1, seed_p2), and inverts.
-    A wrong seed dynamically recovers the exact phase noise corresponding to that key.
+    Receiver side. Decodes the complex ciphertext payload and inverts using
+    either user-provided seeds (seed_p1, seed_p2) or direct phase masks (p1_b64, p2_b64).
     """
-    base = get_base_image()
     try:
-        ciphertext_complex = b64_to_complex(
-            ciphertext_b64, (ciphertext_height, ciphertext_width)
-        )
+        ciphertext_complex = b64_to_complex(ciphertext_b64, tuple(ciphertext_shape))
+        if seed_p1 is not None and seed_p2 is not None:
+            base = get_base_image()
+            p1, p2 = generate_phase_masks(tuple(ciphertext_shape), base, seed_p1, seed_p2)
+        elif p1_b64 and p2_b64:
+            p1 = b64_to_float(p1_b64, tuple(ciphertext_shape))
+            p2 = b64_to_float(p2_b64, tuple(ciphertext_shape))
+        else:
+            raise ValueError("Either (seed_p1, seed_p2) or (p1_b64, p2_b64) must be provided.")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid ciphertext payload: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid ciphertext or decryption parameters: {e}")
 
     try:
         recovered = drpe_decrypt(
             ciphertext_complex=ciphertext_complex,
-            base_image=base,
-            seed_p1=seed_p1,
-            seed_p2=seed_p2,
-            frame_index=0,
+            p1=p1,
+            p2=p2,
         )
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
     match = False
     if _last_cover is not None and _last_cover.shape == recovered.shape:
-        # Same-seed decrypt matches original cover exactly with zero pixel error (atol=1e-15).
+        # Same-mask decrypt matches original cover exactly with zero pixel error (atol=1e-15).
         match = bool(np.allclose(_last_cover, recovered, atol=1e-15))
 
     return DecryptResponse(
@@ -120,3 +128,4 @@ def get_base_image_controller() -> BaseImageResponse:
         image=array_to_base64(base),
         shape=list(base.shape),
     )
+
