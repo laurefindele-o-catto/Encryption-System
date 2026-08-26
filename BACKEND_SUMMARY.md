@@ -91,21 +91,22 @@ The backend is built with **FastAPI** and **NumPy**, structured according to a m
 * **Variables**:
   * `router`: `APIRouter` instance with prefix `/api`.
 * **Functions / Handlers**:
-  * [`encrypt(cover_image: UploadFile, seed_p1: str, seed_p2: str)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L24-L34)
+  * [`encrypt(cover_image: UploadFile, seed_p1: str, seed_p2: str, frame_index: int = 0)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L24-L35)
     * **HTTP Route**: `POST /api/encrypt` (Form Data)
     * **Parameters**:
       * `cover_image`: `UploadFile` — User uploaded image file.
       * `seed_p1`: `str` — Spatial domain key seed.
       * `seed_p2`: `str` — Frequency domain key seed.
+      * `frame_index`: `int = 0` — Optional sequence frame index for Phase 2 transmission slots.
     * **Return Type**: `EncryptResponse`
-    * **Purpose**: Receives uploaded cover image file and dual seeds, invoking `encrypt_controller` to generate DRPE ciphertext payload and display amplitude image.
-  * [`decrypt(req: DecryptRequest)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L37-L45)
+    * **Purpose**: Receives uploaded cover image file, dual seeds, and frame index, invoking `encrypt_controller` to generate DRPE ciphertext payload, phase masks, and display amplitude image.
+  * [`decrypt(req: DecryptRequest)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L38-L50)
     * **HTTP Route**: `POST /api/decrypt` (JSON Payload)
     * **Parameters**:
-      * `req`: `DecryptRequest` Pydantic model containing `ciphertext_b64`, `ciphertext_height`, `ciphertext_width`, `seed_p1`, and `seed_p2`.
+      * `req`: `DecryptRequest` Pydantic model containing `ciphertext_b64`, `ciphertext_shape`, optional `seed_p1`, `seed_p2`, `p1_b64`, `p2_b64`, `frame_index`, and `cover_hash`.
     * **Return Type**: `DecryptResponse`
-    * **Purpose**: Accepts base64-encoded complex ciphertext and decryption seeds, delegating to `decrypt_controller`.
-  * [`base_image()`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L48-L51)
+    * **Purpose**: Accepts base64-encoded complex ciphertext and decryption seeds or direct masks, delegating to `decrypt_controller`.
+  * [`base_image()`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/routers/image_router.py#L53-L56)
     * **HTTP Route**: `GET /api/base-image`
     * **Parameters**: None
     * **Return Type**: `BaseImageResponse`
@@ -117,29 +118,29 @@ The backend is built with **FastAPI** and **NumPy**, structured according to a m
 **Purpose**: Controller layer handling file conversions, exception wrapping, state management, and orchestrating operations between services and routers.
 
 * **State**:
-  * `_last_cover`: Module-level global variable (`np.ndarray | None`) retaining the last encrypted cover image array to perform exact match verification upon decryption.
+  * `_last_cover`: Module-level fallback variable (`np.ndarray | None`) retaining the last encrypted cover image array for single-client local debug. Production/multi-frame uses stateless `cover_hash`.
 * **Functions**:
-  * [`encrypt_controller(cover_image: UploadFile, seed_p1: str, seed_p2: str)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L38-L70)
-    * **Parameters**: `cover_image: UploadFile`, `seed_p1: str`, `seed_p2: str`
+  * [`encrypt_controller(cover_image: UploadFile, seed_p1: str, seed_p2: str, frame_index: int = 0)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L41-L75)
+    * **Parameters**: `cover_image: UploadFile`, `seed_p1: str`, `seed_p2: str`, `frame_index: int = 0`
     * **Return Type**: `EncryptResponse`
     * **Purpose**:
       1. Loads base image array via `get_base_image()`.
-      2. Converts uploaded file into 2D float64 grayscale array using `file_to_array()`.
-      3. Executes `drpe_encrypt()`.
-      4. Stores cover image array in `_last_cover`.
+      2. Converts uploaded file into float64 RGB array using `file_to_array()`.
+      3. Executes `drpe_encrypt()` with `frame_index`.
+      4. Calculates SHA-256 `cover_hash`.
       5. Serializes complex array to Base64 string via `complex_to_b64()`.
       6. Converts amplitude image to Base64 PNG via `array_to_base64()`.
       7. Computes Parseval energy metrics using `energy()`.
-  * [`decrypt_controller(ciphertext_b64: str, ciphertext_height: int, ciphertext_width: int, seed_p1: str, seed_p2: str)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L73-L113)
-    * **Parameters**: `ciphertext_b64: str`, `ciphertext_height: int`, `ciphertext_width: int`, `seed_p1: str`, `seed_p2: str`
+  * [`decrypt_controller(ciphertext_b64: str, ciphertext_shape: list[int], p1_b64: str | None, p2_b64: str | None, seed_p1: str | None, seed_p2: str | None, frame_index: int = 0, cover_hash: str | None = None)`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L78-L121)
+    * **Parameters**: `ciphertext_b64`, `ciphertext_shape`, `p1_b64`, `p2_b64`, `seed_p1`, `seed_p2`, `frame_index`, `cover_hash`
     * **Return Type**: `DecryptResponse`
     * **Purpose**:
-      1. Reconstructs 2D complex128 array using `b64_to_complex()`.
+      1. Reconstructs complex128 array using `b64_to_complex()`.
       2. Retrieves base image using `get_base_image()`.
       3. Runs `drpe_decrypt()`.
-      4. Checks exact array equality with `_last_cover` using `np.allclose(atol=1e-15)` if dimensions match.
+      4. Checks exact bitwise equality statelessly against `cover_hash` if provided, or `_last_cover` fallback.
       5. Formats Base64 PNG image and returns response payload.
-  * [`get_base_image_controller()`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L116-L122)
+  * [`get_base_image_controller()`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/controllers/image_controller.py#L124-L130)
     * **Parameters**: None
     * **Return Type**: `BaseImageResponse`
     * **Purpose**: Encodes cached base image array into Base64 PNG string and returns shape metadata.
@@ -153,23 +154,30 @@ The backend is built with **FastAPI** and **NumPy**, structured according to a m
   * `ImageResponse`: Standard image response containing Base64 encoded PNG (`image: str`).
   * `EncryptResponse`: Response payload for POST `/api/encrypt`.
     * `ciphertext_b64`: `str` (Base64 string of complex128 ciphertext).
-    * `ciphertext_shape`: `list[int]` (`[height, width]`).
+    * `ciphertext_shape`: `list[int]` (`[height, width, 3]` or `[height, width]`).
+    * `p1_b64`: `str` (Base64 float64 spatial phase mask).
+    * `p2_b64`: `str` (Base64 float64 frequency phase mask).
     * `image`: `str` (Base64 PNG of spatial amplitude display image).
-    * `energy`: `float` (Parseval energy sum of display image).
+    * `energy`: `float` (Parseval energy sum of complex ciphertext).
     * `cover_energy`: `float` (Parseval energy sum of original cover image).
+    * `cover_hash`: `str | None` (SHA-256 hash of original cover pixels for stateless verification).
+    * `frame_index`: `int` (Sequence slot index).
   * `DecryptRequest`: Input payload for POST `/api/decrypt`.
     * `ciphertext_b64`: `str`
-    * `ciphertext_height`: `int`
-    * `ciphertext_width`: `int`
-    * `seed_p1`: `str`
-    * `seed_p2`: `str`
+    * `ciphertext_shape`: `list[int]`
+    * `frame_index`: `int = 0`
+    * `seed_p1`: `str | None`
+    * `seed_p2`: `str | None`
+    * `p1_b64`: `str | None`
+    * `p2_b64`: `str | None`
+    * `cover_hash`: `str | None`
   * `DecryptResponse`: Response payload for POST `/api/decrypt`.
     * `image`: `str` (Base64 PNG of recovered image).
     * `energy`: `float` (Parseval energy sum of recovered image).
-    * `match_with_cover`: `bool` (Indicates exact bitwise match with stored cover image).
+    * `match_with_cover`: `bool` (Indicates exact bitwise match with cover).
   * `BaseImageResponse`: Response payload for GET `/api/base-image`.
     * `image`: `str` (Base64 PNG of base reference image).
-    * `shape`: `list[int]` (`[height, width]`).
+    * `shape`: `list[int]` (`[height, width, channels]`).
 
 ---
 
@@ -285,8 +293,8 @@ The backend is built with **FastAPI** and **NumPy**, structured according to a m
 * **`morse_to_symbol_sequence.py`**:
   * [`morse_to_symbol_sequence(morse: str) -> list[int]`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/morse_to_symbol_sequence.py#L8-L30): Planned mapping of Morse characters to symbol integer states ($0$ through $4$).
 * **`symbol_image.py`**:
-  * [`generate_symbol_image(state: int, base_image: np.ndarray) -> np.ndarray`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/symbol_image.py#L15-L39): Planned differential brightness modulation on Block A (+Δ) and Block B (-Δ).
-  * [`read_differential_brightness(image: np.ndarray) -> int`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/symbol_image.py#L42-L60): Planned extraction of mean block brightness difference $\text{sign}(\text{Mean}(A) - \text{Mean}(B))$ from decrypted image.
+  * [`generate_symbol_image(state: dict, base_image: np.ndarray) -> np.ndarray`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/symbol_image.py#L15-L39): Planned differential brightness modulation on Block A ($\pm k\cdot\Delta$) and Block B ($\mp k\cdot\Delta$).
+  * [`read_differential_brightness(image: np.ndarray) -> dict`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/symbol_image.py#L42-L60): Planned extraction of differential brightness $\text{sign}(\text{Mean}(A) - \text{Mean}(B))$ and duration $k = \text{round}(|\text{Mean}(A) - \text{Mean}(B)| / (2\Delta))$ from decrypted image.
 * **`morse_to_text.py`**:
   * [`morse_to_text(morse: str) -> str`](file:///Users/tafsiralnafin/Documents/Signal_Project/Encryption-System/backend/services/encoding/morse_to_text.py#L8-L22): Planned conversion of flat Morse string back to plaintext ASCII.
 
@@ -313,5 +321,6 @@ The backend is built with **FastAPI** and **NumPy**, structured according to a m
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `/api/health` | `GET` | None | `health()` in `main.py` | `{"status": "ok"}` | Liveness check |
 | `/api/base-image` | `GET` | None | `get_base_image_controller()` | `BaseImageResponse` | Fetch reference base image & shape |
-| `/api/encrypt` | `POST` | Multipart Form: `cover_image`, `seed_p1`, `seed_p2` | `encrypt_controller()` | `EncryptResponse` | Perform DRPE encryption & return complex ciphertext + display PNG |
-| `/api/decrypt` | `POST` | JSON: `ciphertext_b64`, `ciphertext_height`, `ciphertext_width`, `seed_p1`, `seed_p2` | `decrypt_controller()` | `DecryptResponse` | Decrypt complex ciphertext & return recovered image + match indicator |
+| `/api/encrypt` | `POST` | Multipart Form: `cover_image`, `seed_p1`, `seed_p2`, `frame_index: int = 0` | `encrypt_controller()` | `EncryptResponse` | Perform DRPE encryption & return complex ciphertext, masks, cover hash, display PNG |
+| `/api/decrypt` | `POST` | JSON: `ciphertext_b64`, `ciphertext_shape`, optional seeds/masks, `frame_index: int = 0`, `cover_hash` | `decrypt_controller()` | `DecryptResponse` | Decrypt complex ciphertext & return recovered image + stateless match indicator |
+
