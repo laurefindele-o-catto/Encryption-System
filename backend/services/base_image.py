@@ -22,7 +22,14 @@ import os
 import numpy as np
 from PIL import Image
 
-from config import BASE_IMAGE_PATH, DEFAULT_BASE_IMAGE_SIZE
+from config import (
+    BASE_IMAGE_PATH,
+    BLOCK_A_COORDS,
+    BLOCK_B_COORDS,
+    BLOCK_SIZE,
+    DEFAULT_BASE_IMAGE_SIZE,
+    DELTA,
+)
 
 # Fixed seed for the fallback synthesis. Stable, arbitrary, memorable.
 # Change it ONLY if you also rotate the on-disk base_image.png, so
@@ -37,13 +44,31 @@ def _load_or_synthesize() -> np.ndarray:
         img = Image.open(BASE_IMAGE_PATH).convert("RGB")
         return np.array(img, dtype=np.float64)
 
-    # Synthesize a deterministic noise pattern; write it to disk so the
-    # next process boot sees the same bytes.
+    # Synthesize a deterministic noise pattern with equalized block means.
     rng = np.random.default_rng(_SYNTH_SEED)
-    arr = rng.uniform(0, 255, size=(DEFAULT_BASE_IMAGE_SIZE, DEFAULT_BASE_IMAGE_SIZE, 3))
+    arr = rng.uniform(60.0, 195.0, size=(DEFAULT_BASE_IMAGE_SIZE, DEFAULT_BASE_IMAGE_SIZE, 3)).astype(np.float64)
+
+    # Deterministic block mean equalization for Phase 2 energy-invariance precondition:
+    ra, ca = BLOCK_A_COORDS
+    rb, cb = BLOCK_B_COORDS
+    sz = BLOCK_SIZE
+
+    block_a = arr[ra : ra + sz, ca : ca + sz, :]
+    block_b = arr[rb : rb + sz, cb : cb + sz, :]
+
+    # Calculate per-channel difference: mean(A) - mean(B)
+    diff = np.mean(block_a, axis=(0, 1)) - np.mean(block_b, axis=(0, 1))
+    # Adjust Block B to equalize means across all channels exactly
+    arr[rb : rb + sz, cb : cb + sz, :] += diff
+
+    # Ensure clipping headroom [7*DELTA, 255 - 7*DELTA] is preserved for all pixels
+    margin = 7 * DELTA
+    arr = np.clip(arr, margin, 255.0 - margin)
+
     os.makedirs(os.path.dirname(BASE_IMAGE_PATH), exist_ok=True)
-    Image.fromarray(arr.astype(np.uint8)).save(BASE_IMAGE_PATH, format="PNG")
+    Image.fromarray(np.round(arr).astype(np.uint8)).save(BASE_IMAGE_PATH, format="PNG")
     return arr
+
 
 
 def get_base_image() -> np.ndarray:

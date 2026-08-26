@@ -25,13 +25,14 @@ async def encrypt(
     cover_image: UploadFile,
     seed_p1: str = Form(...),
     seed_p2: str = Form(...),
+    frame_index: int = Form(0),
 ) -> EncryptResponse:
     """
     Encrypt `cover_image` with the predetermined base image + `seed_p1` and `seed_p2`.
     Returns the (visually noise-like) ciphertext image, the ciphertext payload,
     and energies for the Parseval readout.
     """
-    return await encrypt_controller(cover_image, seed_p1, seed_p2)
+    return await encrypt_controller(cover_image, seed_p1, seed_p2, frame_index=frame_index)
 
 
 @router.post("/decrypt", response_model=DecryptResponse)
@@ -46,7 +47,10 @@ async def decrypt(req: DecryptRequest) -> DecryptResponse:
         p2_b64=req.p2_b64,
         seed_p1=req.seed_p1,
         seed_p2=req.seed_p2,
+        frame_index=req.frame_index,
+        cover_hash=req.cover_hash,
     )
+
 
 
 

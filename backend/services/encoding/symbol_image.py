@@ -13,25 +13,26 @@ import numpy as np
 
 
 def generate_symbol_image(
-    state: int,
+    state: dict,
     base_image: np.ndarray,
 ) -> np.ndarray:
     """
-    Build a single image ready to be DRPE-encrypted, encoding `state`
-    via differential brightness on two predetermined blocks.
+    Build a single image ready to be DRPE-encrypted, encoding a timed Morse
+    symbol `state` via differential brightness on two predetermined blocks.
 
     From the spec:
-        if state maps to symbol-type-1: Block A +Δ, Block B -Δ
-        if state maps to symbol-type-2: Block A -Δ, Block B +Δ
-        net energy change across the full image = 0 (Parseval-safe)
+        if state["polarity"] == "tone": Block A +k·DELTA, Block B -k·DELTA
+        if state["polarity"] == "silence": Block A -k·DELTA, Block B +k·DELTA
+        linear cross-term cancels (2kΔ(S_A - S_B) = 0), leaving only the
+        small bounded quadratic residual 2·N·(k·DELTA)^2.
 
     Args:
-        state: integer from morse_to_symbol_sequence().
-        base_image: 2D float64 — the shared template image.
+        state: dict from morse_to_symbol_sequence() containing 'polarity', 'k', and 'kind'.
+        base_image: float64 ndarray — the shared template image.
 
     Returns:
-        2D float64 — a copy of base_image with the block modifications
-                     applied, ready to be passed into drpe_encrypt().
+        float64 ndarray — a copy of base_image with the block modifications
+                          applied, ready to be passed into drpe_encrypt().
 
     Raises:
         NotImplementedError: always, in Phase 1.
@@ -41,20 +42,22 @@ def generate_symbol_image(
 
 def read_differential_brightness(
     image: np.ndarray,
-) -> int:
+) -> dict:
     """
     Inverse of generate_symbol_image(). After a DRPE-decrypted image
-    comes back, read the mean brightness in Block A and Block B and
-    return sign(Brightness(A) - Brightness(B)) as the recovered state.
+    comes back, read the mean brightness in Block A and Block B, and extract:
+        sign = sign(mean(A) - mean(B))
+        k = round(|mean(A) - mean(B)| / (2 * DELTA))
 
     Args:
-        image: 2D float64 — a DRPE-decrypted image (the output of
+        image: float64 ndarray — a DRPE-decrypted image (the output of
                drpe_decrypt()).
 
     Returns:
-        int — the recovered symbol state.
+        dict — recovered symbol descriptor: {"polarity": "tone" | "silence", "k": int, "kind": str}
 
     Raises:
         NotImplementedError: always, in Phase 1.
     """
     raise NotImplementedError("read_differential_brightness is a Phase 2 feature")
+

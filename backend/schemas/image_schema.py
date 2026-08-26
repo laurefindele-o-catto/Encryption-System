@@ -19,16 +19,21 @@ class EncryptResponse(BaseModel):
     image: str          # base64-encoded PNG of |ciphertext| (display image)
     energy: float       # Σ(pixel²) over the displayed amplitude
     cover_energy: float  # Σ(pixel²) over the original cover (for Parseval readout)
+    cover_hash: str | None = None  # SHA-256 hash of original cover pixels for stateless verification
+    frame_index: int = 0  # Sequence index within a transmission
 
 
 class DecryptRequest(BaseModel):
     """Payload sent to POST /api/decrypt."""
     ciphertext_b64: str
     ciphertext_shape: list[int]
+    frame_index: int = 0
     seed_p1: str | None = None
     seed_p2: str | None = None
     p1_b64: str | None = None
     p2_b64: str | None = None
+    cover_hash: str | None = None  # Optional client-provided hash for stateless verification
+
 
 
 class DecryptResponse(BaseModel):
