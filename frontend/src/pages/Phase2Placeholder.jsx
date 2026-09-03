@@ -25,12 +25,12 @@ export default function Phase2Placeholder() {
         <li>Morse → ordered symbol states (dot/dash/gap types as integers)</li>
         <li>
           For each state, generate one image by applying a differential
-          two-block brightness encoding on the shared base image
+          two-block brightness encoding on a shared RGB template
           (Block A ±Δ, Block B ∓Δ; net energy change = 0)
         </li>
         <li>
           Encrypt each generated image with the existing DRPE pipeline
-          (one seed per symbol, auto-incremented)
+          (one derived frame key per symbol)
         </li>
         <li>Transmit the resulting sequence of encrypted images</li>
       </ol>

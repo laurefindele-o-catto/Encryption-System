@@ -17,12 +17,10 @@ import os
 # backend/config.py, so the data directory lives at backend/data/.
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_BACKEND_DIR, "data")
-BASE_IMAGE_PATH = os.path.join(DATA_DIR, "base_image.png")
 
 # --- Demo defaults ---------------------------------------------------------
 
 DEFAULT_SEED = "phase1-demo"
-DEFAULT_BASE_IMAGE_SIZE = 256  # square, used when we have to synthesize one
 
 # --- Phase 2 placeholders (intentionally unused in Phase 1) ----------------
 # The future module services/encoding/symbol_image.py will use these.

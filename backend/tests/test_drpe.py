@@ -17,7 +17,6 @@ from PIL import Image
 from fastapi.testclient import TestClient
 
 from main import app
-from services.base_image import get_base_image
 from services.drpe import drpe_decrypt, drpe_encrypt, energy
 from services.image_utils import float_to_b64
 from services.keys import derive_key
@@ -39,14 +38,13 @@ def test_key_derivation():
 
 
 def test_drpe_roundtrip_fidelity():
-    """Verify passing enc['p1'] and enc['p2'] directly recovers cover image with zero error (< 1e-15)."""
-    base = get_base_image()
+    """Verify the current key-material flow reconstructs the cover exactly."""
     rng = np.random.default_rng(42)
-    cover = np.round(rng.uniform(0, 255, size=base.shape))
+    cover = np.round(rng.uniform(0, 255, size=(64, 64, 3)))
 
-    seed_p1 = "correct-p1-seed"
-    seed_p2 = "correct-p2-seed"
-    enc = drpe_encrypt(cover, base, seed_p1=seed_p1, seed_p2=seed_p2)
+    p1_material = b"roundtrip-p1-material"
+    p2_material = b"roundtrip-p2-material"
+    enc = drpe_encrypt(cover, p1_material, p2_material)
     dec = drpe_decrypt(enc["complex"], p1=enc["p1"], p2=enc["p2"])
 
     max_err = np.max(np.abs(cover - dec))
@@ -55,25 +53,21 @@ def test_drpe_roundtrip_fidelity():
 
 def test_drpe_partial_and_wrong_mask_rejection():
     """Verify wrong P1, wrong P2, or both wrong yield garbled output."""
-    base = get_base_image()
-    cover = np.full(base.shape, 128.0)
+    cover = np.full((32, 32, 3), 128.0)
 
-    seed_p1 = "correct-p1"
-    seed_p2 = "correct-p2"
-    enc = drpe_encrypt(cover, base, seed_p1=seed_p1, seed_p2=seed_p2)
+    p1_material = b"wrong-mask-p1"
+    p2_material = b"wrong-mask-p2"
+    enc = drpe_encrypt(cover, p1_material, p2_material)
 
     wrong_p1 = np.random.default_rng(101).uniform(0, 2 * np.pi, size=cover.shape)
     wrong_p2 = np.random.default_rng(102).uniform(0, 2 * np.pi, size=cover.shape)
 
-    # 1. Wrong P1, correct P2
     dec_wrong_p1 = drpe_decrypt(enc["complex"], p1=wrong_p1, p2=enc["p2"])
     assert np.max(np.abs(cover - dec_wrong_p1)) > 10.0, "Wrong P1 mask must fail to recover cover"
 
-    # 2. Correct P1, wrong P2
     dec_wrong_p2 = drpe_decrypt(enc["complex"], p1=enc["p1"], p2=wrong_p2)
     assert np.max(np.abs(cover - dec_wrong_p2)) > 10.0, "Wrong P2 mask must fail to recover cover"
 
-    # 3. Both wrong
     dec_wrong_both = drpe_decrypt(enc["complex"], p1=wrong_p1, p2=wrong_p2)
     assert np.max(np.abs(cover - dec_wrong_both)) > 10.0, "Both wrong masks must fail to recover cover"
 
@@ -90,16 +84,6 @@ def test_api_health():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-
-
-def test_api_base_image():
-    """Verify GET /api/base-image."""
-    response = client.get("/api/base-image")
-    assert response.status_code == 200
-    data = response.json()
-    assert "image" in data
-    assert "shape" in data
-    assert len(data["shape"]) == 3  # [H, W, 3] for RGB
 
 
 def test_api_encrypt_decrypt_flow():
@@ -187,10 +171,9 @@ def test_api_encrypt_decrypt_flow():
 
 def test_variable_size_image_encryption():
     """Verify that RGB images of non-square shapes retain their dimensions (H, W, 3)."""
-    base = get_base_image()
     cover = np.round(np.random.uniform(0, 255, size=(384, 512, 3)))
 
-    enc = drpe_encrypt(cover, base, seed_p1="var-p1", seed_p2="var-p2")
+    enc = drpe_encrypt(cover, b"var-p1", b"var-p2")
     assert enc["complex"].shape == (384, 512, 3)
     assert enc["amplitude"].shape == (384, 512, 3)
 
