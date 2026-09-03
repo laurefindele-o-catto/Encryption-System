@@ -63,13 +63,13 @@ def generate_phase_masks(
 
     # Generate P1 from seed_p1
     base_seed_1 = derive_key(seed_p1, frame_index)
-    mixed_1 = base_seed_1 ^ blob_int ^ 0x50314D3150314D31  # Full 64-bit XOR tag for P1
+    mixed_1 = base_seed_1 ^ blob_int ^ 0x50314D31  # XOR tag for P1
     rng_1 = np.random.default_rng(mixed_1)
     p1 = rng_1.uniform(0.0, 2.0 * np.pi, size=shape).astype(np.float64)
 
     # Generate P2 from seed_p2
     base_seed_2 = derive_key(seed_p2, frame_index)
-    mixed_2 = base_seed_2 ^ blob_int ^ 0x50324D3250324D32  # Full 64-bit XOR tag for P2
+    mixed_2 = base_seed_2 ^ blob_int ^ 0x50324D32  # XOR tag for P2
     rng_2 = np.random.default_rng(mixed_2)
     p2 = rng_2.uniform(0.0, 2.0 * np.pi, size=shape).astype(np.float64)
 
@@ -155,10 +155,9 @@ def drpe_decrypt(
 
 def energy(image: np.ndarray) -> float:
     """
-    Σ(|pixel|²) over the image — the Parseval-relevant quantity. Theoretically
-    invariant between cover and DRPE ciphertext (up to floating-point precision).
+    Σ(pixel²) over the image — the Parseval-relevant quantity. Theoretically
+    invariant between cover and DRPE ciphertext (up to display-side clipping).
     Useful as a sanity-check readout in the demo.
     """
-    return float(np.sum(np.abs(image) ** 2))
-
+    return float(np.sum(image.astype(np.float64) ** 2))
 
