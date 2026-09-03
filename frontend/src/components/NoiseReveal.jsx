@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 export default function NoiseReveal({ active = false, width = 1100, height = 740 }) {
   const pattern = useMemo(() => {
-    const dots = [];
+    const shards = [];
     const random = (() => {
       let seed = 1337;
       return () => {
@@ -11,15 +11,19 @@ export default function NoiseReveal({ active = false, width = 1100, height = 740
       };
     })();
 
-    for (let i = 0; i < 2400; i += 1) {
-      const x = Math.floor(random() * width);
-      const y = Math.floor(random() * height);
-      const brightness = 200 + Math.floor(random() * 55);
-      const blue = Math.random() < 0.08;
-      dots.push({ x, y, brightness, blue, size: Math.random() < 0.2 ? 2 : 1.5 });
+    for (let i = 0; i < 48; i += 1) {
+      shards.push({
+        x: Math.floor(random() * width),
+        y: Math.floor(random() * height),
+        size: 14 + Math.floor(random() * 32),
+        rotation: Math.floor(random() * 360),
+        opacity: 0.16 + random() * 0.24,
+        narrow: 0.35 + random() * 0.4,
+        bright: i % 7 === 0,
+      });
     }
 
-    return dots;
+    return shards;
   }, [width, height]);
 
   return (
@@ -29,8 +33,8 @@ export default function NoiseReveal({ active = false, width = 1100, height = 740
         position: "fixed",
         inset: 0,
         pointerEvents: "none",
-        background: active ? "#000000" : "transparent",
-        opacity: active ? 1 : 0,
+        background: active ? "rgba(0, 0, 0, 0.72)" : "transparent",
+        opacity: active ? 0.82 : 0,
         transition: "opacity 0.35s ease",
         zIndex: 0,
       }}
@@ -42,36 +46,38 @@ export default function NoiseReveal({ active = false, width = 1100, height = 740
           width: "100vw",
           height: "100vh",
           display: "block",
-          background: "#000",
+          background: "transparent",
         }}
       >
-        {pattern.map((dot, index) => (
-          <circle
-            key={`${dot.x}-${dot.y}-${index}`}
-            cx={dot.x}
-            cy={dot.y}
-            r={dot.size}
-            fill={dot.blue ? `rgba(50, 130, 255, ${0.8 + (dot.x + dot.y) % 3 * 0.05})` : `rgba(${dot.brightness}, ${dot.brightness}, ${dot.brightness}, 0.95)`}
-            opacity={dot.blue ? 0.9 : 1}
-          />
-        ))}
+        <defs>
+          <linearGradient id="glassShardFill" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.52" />
+            <stop offset="42%" stopColor="#dcecff" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#9bbde2" stopOpacity="0.06" />
+          </linearGradient>
+          <linearGradient id="brightGlassShardFill" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+            <stop offset="42%" stopColor="#eaf4ff" stopOpacity="0.42" />
+            <stop offset="100%" stopColor="#b9d7f4" stopOpacity="0.14" />
+          </linearGradient>
+        </defs>
 
-        <g opacity={active ? 1 : 0}>
-          {Array.from({ length: 140 }).map((_, i) => {
-            const x = 18 + ((i * 13) % 180);
-            const y = 18 + ((i * 17) % 180);
-            const hasBlue = i % 5 === 0;
-            return (
-              <circle
-                key={`reveal-${i}`}
-                cx={x}
-                cy={y}
-                r={hasBlue ? 2.1 : 1.6}
-                fill={hasBlue ? "rgba(55, 130, 255, 0.95)" : "rgba(255,255,255,0.96)"}
-              />
-            );
-          })}
-        </g>
+        {pattern.map((shard, index) => {
+          const points = `${shard.x},${shard.y - shard.size} ${shard.x + shard.size * shard.narrow},${shard.y - shard.size * 0.12} ${shard.x + shard.size * 0.2},${shard.y + shard.size} ${shard.x - shard.size * 0.58},${shard.y + shard.size * 0.28}`;
+          return (
+            <polygon
+              key={`shard-${index}`}
+              points={points}
+              fill={`url(#${shard.bright ? "brightGlassShardFill" : "glassShardFill"})`}
+              stroke={shard.bright ? "rgba(255, 255, 255, 0.88)" : "rgba(235, 246, 255, 0.55)"}
+              strokeWidth={shard.bright ? "1.2" : "0.8"}
+              strokeLinejoin="round"
+              opacity={shard.bright ? Math.min(0.68, shard.opacity + 0.25) : shard.opacity}
+              transform={`rotate(${shard.rotation} ${shard.x} ${shard.y})`}
+            />
+          );
+        })}
+
       </svg>
     </div>
   );

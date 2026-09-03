@@ -42,6 +42,7 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
       const res = await api.post("/encrypt", form);
 
       const payload = {
+        messageType: "image",
         ciphertextB64: res.data.ciphertext_b64,
         ciphertextShape: res.data.ciphertext_shape,
         messageId: res.data.message_id,
@@ -94,13 +95,14 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
 
       const res = await api.post("/text/encrypt", form);
       const textPacket = {
+        messageType: "text",
         messageId: res.data.message_id,
         saltB64: res.data.salt_b64,
         frameCount: res.data.frame_count,
         morse: res.data.morse,
         symbols: res.data.symbols,
         baseImageShape: res.data.base_image_shape,
-        image: res.data.image,
+        previews: res.data.previews || [],
       };
 
       onPacketReady(textPacket);

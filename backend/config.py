@@ -31,6 +31,10 @@ DEFAULT_SEED = "phase1-demo"
 BLOCK_A_COORDS = (10, 10)
 # Top-left pixel of block B (row, col) on the base image.
 BLOCK_B_COORDS = (10, 50)
+# Top-left pixel of block C (row, col) on the base image.
+BLOCK_C_COORDS = (50, 10)
+# Top-left pixel of block D (row, col) on the base image.
+BLOCK_D_COORDS = (50, 50)
 # Per-block edge length in pixels.
 BLOCK_SIZE = 16
 # Brightness delta applied to each block (net change across both blocks = 0).

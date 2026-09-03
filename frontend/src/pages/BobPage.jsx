@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../api.js";
 
 export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, setRevealActive }) {
@@ -7,6 +7,36 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
   const [status, setStatus] = useState("Waiting for Alice packet.");
   const [busy, setBusy] = useState(false);
   const [decryptedImage, setDecryptedImage] = useState(null);
+  const [packageSeen, setPackageSeen] = useState(false);
+  const [imageVisible, setImageVisible] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
+  const [frameIndex, setFrameIndex] = useState(0);
+
+  const isTextPacket = packet?.messageType === "text";
+  const framePreviews = packet?.previews || packet?.frames || [];
+  const currentFrame = framePreviews[frameIndex];
+  const currentFrameImage = currentFrame?.image || currentFrame?.preview;
+
+  const handlePackageSeen = () => {
+    setPackageSeen(true);
+    setImageVisible(true);
+  };
+
+  useEffect(() => {
+    setPackageSeen(false);
+    setImageVisible(false);
+    setLightboxImage(null);
+    setFrameIndex(0);
+    setDecryptedImage(null);
+  }, [packet?.messageId]);
+
+  const previousFrame = () => {
+    setFrameIndex((index) => Math.max(0, index - 1));
+  };
+
+  const nextFrame = () => {
+    setFrameIndex((index) => Math.min(framePreviews.length - 1, index + 1));
+  };
 
   const handleDecrypt = async () => {
     if (!packet) {
@@ -166,12 +196,118 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
             <img
               src={`data:image/png;base64,${decryptedImage}`}
               alt="Decrypted image"
-              style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 10 }}
+              onClick={() => setLightboxImage(`data:image/png;base64,${decryptedImage}`)}
+              style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in" }}
+            />
+          ) : !packet ? (
+            <div style={{ color: "#859ab1", fontSize: 14 }}>Waiting for Alice's package.</div>
+          ) : !packageSeen ? (
+            <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
+              <strong style={{ display: "block", marginBottom: 10 }}>Got a new package!</strong>
+              <button
+                type="button"
+                onClick={handlePackageSeen}
+                style={{
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "linear-gradient(135deg, #edf1f5, #9da8b5, #e7ecf2)",
+                  color: "#1b2430",
+                  padding: "9px 14px",
+                  borderRadius: 9,
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                {isTextPacket ? "View frames" : "View image"}
+              </button>
+            </div>
+          ) : isTextPacket ? (
+            framePreviews.length > 0 && imageVisible && currentFrameImage ? (
+              <img
+                src={`data:image/png;base64,${currentFrameImage}`}
+                alt={`Encrypted frame ${frameIndex + 1}`}
+                onClick={() => setLightboxImage(`data:image/png;base64,${currentFrameImage}`)}
+                style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in", imageRendering: "auto" }}
+              />
+            ) : (
+              <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
+                {framePreviews.length > 0 ? "Click View frames to inspect the encrypted sequence." : "Encrypted frames are ready for Bob."}
+              </div>
+            )
+          ) : imageVisible && packet.image ? (
+            <img
+              src={`data:image/png;base64,${packet.image}`}
+              alt="Encrypted package"
+              onClick={() => setLightboxImage(`data:image/png;base64,${packet.image}`)}
+              style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in" }}
             />
           ) : (
-            <div style={{ color: "#859ab1", fontSize: 14 }}>Decrypted image will appear here.</div>
+            <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
+              Encrypted package is visible above.
+            </div>
           )}
         </div>
+
+        {isTextPacket && framePreviews.length > 0 && imageVisible && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: "14px 16px",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 12,
+              background: "rgba(255,255,255,0.035)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+              <span style={{ color: "#aebbd0", fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase" }}>
+                Frame navigator
+              </span>
+              <output style={{ color: "#f4f8ff", fontVariantNumeric: "tabular-nums", fontSize: 14 }}>
+                {String(frameIndex + 1).padStart(2, "0")} <span style={{ color: "#748198" }}>/ {String(framePreviews.length).padStart(2, "0")}</span>
+              </output>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button type="button" onClick={previousFrame} disabled={frameIndex === 0} aria-label="Previous frame" style={frameButtonStyle}>
+              &#8592;
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={framePreviews.length - 1}
+              value={frameIndex}
+              onChange={(event) => setFrameIndex(Number(event.target.value))}
+              aria-label="Encrypted frame index"
+              style={{ flex: 1, accentColor: "#e7edf5", cursor: "pointer" }}
+            />
+            <button type="button" onClick={nextFrame} disabled={frameIndex === framePreviews.length - 1} aria-label="Next frame" style={frameButtonStyle}>
+              &#8594;
+            </button>
+            </div>
+            <input
+              type="number"
+              min="1"
+              max={framePreviews.length}
+              value={frameIndex + 1}
+              onChange={(event) => {
+                const requestedFrame = Number(event.target.value);
+                if (Number.isInteger(requestedFrame)) {
+                  setFrameIndex(Math.min(framePreviews.length - 1, Math.max(0, requestedFrame - 1)));
+                }
+              }}
+              aria-label="Selected frame number"
+              style={{
+                width: 72,
+                marginTop: 10,
+                boxSizing: "border-box",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 8,
+                background: "rgba(0,0,0,0.32)",
+                color: "#f4f8ff",
+                padding: "7px 8px",
+                textAlign: "center",
+              }}
+            />
+          </div>
+        )}
 
         <div style={{ marginTop: 18, color: "#dceaf7", lineHeight: 1.6 }}>
           <div><strong>Packet received:</strong> {packet ? "yes" : "no"}</div>
@@ -179,6 +315,42 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
           <div><strong>Reveal active:</strong> {revealActive ? "yes" : "no"}</div>
         </div>
       </div>
+
+      {lightboxImage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Expanded package image"
+          onClick={() => setLightboxImage(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            background: "rgba(0,0,0,0.86)",
+            cursor: "zoom-out",
+          }}
+        >
+          <img
+            src={lightboxImage}
+            alt="Expanded encrypted package"
+            style={{ maxWidth: "min(92vw, 1100px)", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }}
+          />
+        </div>
+      )}
     </div>
   );
 }
+
+const frameButtonStyle = {
+  width: 36,
+  height: 36,
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 9,
+  background: "rgba(255,255,255,0.08)",
+  color: "#f4f8ff",
+  cursor: "pointer",
+};
