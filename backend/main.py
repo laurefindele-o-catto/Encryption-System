@@ -3,9 +3,8 @@ FastAPI entry point.
 
 Routes:
     GET  /api/health
-    GET  /api/base-image
-    POST /api/encrypt   (cover image + seed)
-    POST /api/decrypt   (message_id + seed)
+    POST /api/encrypt   (cover image + secret key image + password)
+    POST /api/decrypt-with-key-images   (message_id + key image + password)
 
 The DRPE engine lives in services/drpe.py. The Phase 2 Morse/text
 extension point is services/encoding/ (currently a placeholder package

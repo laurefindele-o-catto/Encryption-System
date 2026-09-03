@@ -1,9 +1,11 @@
 import base64
 import io
+import hashlib
 
 import numpy as np
 from fastapi import UploadFile
 from PIL import Image
+
 
 
 async def file_to_array(
@@ -59,3 +61,32 @@ def b64_to_float(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
     return np.frombuffer(raw_bytes, dtype=np.float64).reshape(tuple(shape))
 
 
+
+def canonicalize_key_image(raw: bytes) -> np.ndarray:
+    """
+    Decode and normalize a key image to RGB uint8 pixels.
+    """
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    image = image.resize((256, 256), Image.Resampling.LANCZOS)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def hash_canonical_key_image(pixels: np.ndarray) -> bytes:
+    """
+    Hash canonical RGB uint8 pixels.
+    """
+    header = b"DRPE-KEY-IMAGE-v1"
+    shape = np.asarray(pixels.shape, dtype=np.uint32).tobytes()
+    return hashlib.sha256(
+        header + shape + pixels.tobytes()
+    ).digest()
+    
+
+async def key_image_digest(upload: UploadFile) -> bytes:
+    raw = await upload.read()
+
+    if not raw:
+        raise ValueError("Key image is empty.")
+
+    pixels = canonicalize_key_image(raw)
+    return hash_canonical_key_image(pixels)
