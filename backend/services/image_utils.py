@@ -39,6 +39,16 @@ def array_to_base64(arr: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+def array_to_base64_preview(arr: np.ndarray, max_size: int = 64) -> str:
+    """Encode a resized PNG preview without changing the source array."""
+    clipped = np.clip(np.round(arr), 0, 255).astype(np.uint8)
+    image = Image.fromarray(clipped)
+    image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
 def complex_to_b64(c: np.ndarray) -> str:
     """Losslessly encode a complex128 numpy array to a base64 string."""
     return base64.b64encode(c.astype(np.complex128).tobytes()).decode("utf-8")

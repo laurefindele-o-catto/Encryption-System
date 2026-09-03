@@ -28,3 +28,21 @@ class DecryptResponse(BaseModel):
     match_with_cover: bool  # True iff the server still has the original and they match
 
 
+class TextFramePreview(BaseModel):
+    """Optional display-only preview for one encrypted text frame."""
+    frame_index: int
+    image: str
+    energy: float
+
+
+class TextEncryptResponse(BaseModel):
+    """Returned by POST /api/text/encrypt."""
+    message_id: str
+    salt_b64: str
+    morse: str
+    symbols: list[int]
+    frame_count: int
+    base_image_shape: list[int]
+    previews: list[TextFramePreview] = []
+
+

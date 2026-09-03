@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.image_router import router as image_router
+from routers.text_router import router as text_router
 
 app = FastAPI(title="DRPE Phase 1 Demo API")
 
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(image_router)
+app.include_router(text_router)
 
 
 @app.get("/api/health")
