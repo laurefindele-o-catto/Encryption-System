@@ -3,9 +3,8 @@ FastAPI entry point.
 
 Routes:
     GET  /api/health
-    GET  /api/base-image
-    POST /api/encrypt   (cover image + seed)
-    POST /api/decrypt   (message_id + seed)
+    POST /api/encrypt   (cover image + secret key image + password)
+    POST /api/decrypt-with-key-images   (message_id + key image + password)
 
 The DRPE engine lives in services/drpe.py. The Phase 2 Morse/text
 extension point is services/encoding/ (currently a placeholder package
@@ -16,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.image_router import router as image_router
+from routers.text_router import router as text_router
 
 app = FastAPI(title="DRPE Phase 1 Demo API")
 
@@ -29,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(image_router)
+app.include_router(text_router)
 
 
 @app.get("/api/health")

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import api from "../api.js";
 import ImagePanel from "../components/drpe/ImagePanel.jsx";
 import { processImageFile } from "../utils/imageResizer.js";
@@ -12,16 +12,13 @@ export default function DRPEDemo() {
   const [coverPreview, setCoverPreview] = useState(null); // base64 string
   const [resizeInfo, setResizeInfo] = useState(null);
 
-  // Dual seeds for Encryption (Sender)
-  const [seedP1, setSeedP1] = useState("seed-p1-demo");
-  const [seedP2, setSeedP2] = useState("seed-p2-demo");
+  const [secretKeyImage, setSecretKeyImage] = useState(null);
+  const [secretPassword, setSecretPassword] = useState("");
 
-  // Receiver decryption inputs (initially empty, only populated if user types or clicks helper)
-  const [decryptP1, setDecryptP1] = useState("");
-  const [decryptP2, setDecryptP2] = useState("");
-
-  const [baseImage, setBaseImage] = useState(null);
-  const [baseShape, setBaseShape] = useState(null);
+  const [receiverSecretKeyImage, setReceiverSecretKeyImage] = useState(null);
+  const [receiverPassword, setReceiverPassword] = useState("");
+  const [messageId, setMessageId] = useState(null);
+  const [saltB64, setSaltB64] = useState(null);
 
   const [ciphertextB64, setCiphertextB64] = useState(null);
   const [ciphertextShape, setCiphertextShape] = useState(null);
@@ -36,19 +33,6 @@ export default function DRPEDemo() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // Fetch the predetermined base image once on mount.
-  useEffect(() => {
-    api
-      .get("/base-image")
-      .then((res) => {
-        setBaseImage(res.data.image);
-        setBaseShape(res.data.shape);
-      })
-      .catch((err) =>
-        setError(err.response?.data?.detail || "Failed to load base image")
-      );
-  }, []);
-
   // Handle uploaded cover file with automatic variable image processor.
   const handleCoverFile = async (file) => {
     setError(null);
@@ -60,8 +44,6 @@ export default function DRPEDemo() {
     setDecryptStatusMessage("");
     setCoverEnergy(null);
     setCipherEnergy(null);
-    setDecryptP1("");
-    setDecryptP2("");
     if (!file) {
       setCoverFile(null);
       setCoverPreview(null);
@@ -96,6 +78,10 @@ export default function DRPEDemo() {
 
   const handleEncrypt = async () => {
     if (!coverFile) return;
+    if (!secretKeyImage || !secretPassword) {
+      setError("Please provide the secret key image and password.");
+      return;
+    }
     setError(null);
     setBusy(true);
     setDecryptedResult(null);
@@ -103,8 +89,8 @@ export default function DRPEDemo() {
     setDecryptStatusMessage("");
     const form = new FormData();
     form.append("cover_image", coverFile);
-    form.append("seed_p1", seedP1);
-    form.append("seed_p2", seedP2);
+    form.append("secret_key_image", secretKeyImage);
+    form.append("secret_password", secretPassword);
     try {
       const res = await api.post("/encrypt", form);
       setCiphertextB64(res.data.ciphertext_b64);
@@ -112,8 +98,8 @@ export default function DRPEDemo() {
       setCiphertext(res.data.image);
       setCoverEnergy(res.data.cover_energy);
       setCipherEnergy(res.data.energy);
-      // Keep decryption input boxes empty after encryption.
-      // User must enter or choose P1 and P2 keys/seeds to decrypt.
+      setMessageId(res.data.message_id);
+      setSaltB64(res.data.salt_b64);
     } catch (err) {
       console.error("Encrypt error:", err);
       const detail =
@@ -129,8 +115,12 @@ export default function DRPEDemo() {
       setError("Please encrypt an image first.");
       return;
     }
-    if (!decryptP1.trim() || !decryptP2.trim()) {
-      setError("Please enter Decryption Key/Seed P₁ and P₂ in the boxes below before decrypting.");
+    if (!receiverSecretKeyImage) {
+      setError("Please upload the receiver secret key image before decrypting.");
+      return;
+    }
+    if (!receiverPassword || !saltB64 || !messageId) {
+      setError("Please provide the receiver password and encrypt an image first.");
       return;
     }
     setError(null);
@@ -139,20 +129,14 @@ export default function DRPEDemo() {
     setDecryptedMatch(null);
     setDecryptStatusMessage("");
 
-    // If user provided a base64 mask payload (> 100 chars), send as p1_b64/p2_b64; otherwise as seeds
-    const isP1Base64 = decryptP1.length > 200;
-    const isP2Base64 = decryptP2.length > 200;
-
-    const payload = {
-      ciphertext_b64: ciphertextB64,
-      ciphertext_shape: ciphertextShape,
-      ...(isP1Base64 && isP2Base64
-        ? { p1_b64: decryptP1.trim(), p2_b64: decryptP2.trim() }
-        : { seed_p1: decryptP1.trim(), seed_p2: decryptP2.trim() }),
-    };
+    const payload = new FormData();
+    payload.append("secret_key_image", receiverSecretKeyImage);
+    payload.append("secret_password", receiverPassword);
+    payload.append("message_id", messageId || "");
+    payload.append("salt_b64", saltB64);
 
     try {
-      const res = await api.post("/decrypt", payload);
+      const res = await api.post("/decrypt-with-key-images", payload);
       setDecryptedResult(res.data.image);
       setDecryptedMatch(res.data.match_with_cover);
 
@@ -175,27 +159,9 @@ export default function DRPEDemo() {
     }
   };
 
-  const randomP1 = () => setSeedP1(Math.random().toString(36).slice(2, 10));
-  const randomP2 = () => setSeedP2(Math.random().toString(36).slice(2, 10));
-
-  const pasteMatchingKeys = () => {
-    setDecryptP1(seedP1);
-    setDecryptP2(seedP2);
-  };
-
-  const pasteWrongP1 = () => {
-    setDecryptP1(seedP1 + "_wrong");
-    setDecryptP2(seedP2);
-  };
-
-  const pasteWrongP2 = () => {
-    setDecryptP1(seedP1);
-    setDecryptP2(seedP2 + "_wrong");
-  };
-
   const clearDecryptInputs = () => {
-    setDecryptP1("");
-    setDecryptP2("");
+    setReceiverSecretKeyImage(null);
+    setReceiverPassword("");
   };
 
   return (
@@ -271,54 +237,24 @@ export default function DRPEDemo() {
             )}
           </div>
 
-          {/* Encryption Seed P1 */}
-          <div style={{ marginBottom: 8 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#374151",
-              }}
-            >
-              Encryption Seed P1 (Spatial Mask Seed)
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Secret Key Image
             </label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="text"
-                value={seedP1}
-                onChange={(e) => setSeedP1(e.target.value)}
-                style={{ flex: 1, padding: "4px 8px" }}
-              />
-              <button onClick={randomP1} type="button">
-                Random P1 Seed
-              </button>
-            </div>
+            <input type="file" accept="image/*" onChange={(e) => setSecretKeyImage(e.target.files[0] || null)} />
           </div>
 
-          {/* Encryption Seed P2 */}
           <div style={{ marginBottom: 16 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#374151",
-              }}
-            >
-              Encryption Seed P2 (Frequency Mask Seed)
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Secret Password
             </label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="text"
-                value={seedP2}
-                onChange={(e) => setSeedP2(e.target.value)}
-                style={{ flex: 1, padding: "4px 8px" }}
-              />
-              <button onClick={randomP2} type="button">
-                Random P2 Seed
-              </button>
-            </div>
+            <input
+              type="password"
+              value={secretPassword}
+              onChange={(e) => setSecretPassword(e.target.value)}
+              placeholder="Optional until KDF is implemented"
+              style={{ width: "100%", padding: "6px 10px", boxSizing: "border-box" }}
+            />
           </div>
 
           <button
@@ -360,112 +296,29 @@ export default function DRPEDemo() {
             2. Receiver Setup (Decryption Keys P₁ & P₂)
           </h3>
 
-          {/* Decryption Key P1 Input */}
           <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 4,
-              }}
-            >
-              Decryption Key / Seed P₁ (Spatial Domain)
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Receiver Secret Key Image
+            </label>
+            <input type="file" accept="image/*" onChange={(e) => setReceiverSecretKeyImage(e.target.files[0] || null)} />
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Receiver Secret Password
             </label>
             <input
-              type="text"
-              placeholder="Enter P1 decryption key/seed..."
-              value={decryptP1}
-              onChange={(e) => setDecryptP1(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: 13,
-                boxSizing: "border-box",
-                borderRadius: 4,
-                border: "1px solid #ccc",
-                background: "#ffffff",
-              }}
+              type="password"
+              value={receiverPassword}
+              onChange={(e) => setReceiverPassword(e.target.value)}
+              placeholder="Must match sender password"
+              style={{ width: "100%", padding: "6px 10px", boxSizing: "border-box" }}
             />
           </div>
 
-          {/* Decryption Key P2 Input */}
-          <div style={{ marginBottom: 14 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 4,
-              }}
-            >
-              Decryption Key / Seed P₂ (Frequency Domain)
-            </label>
-            <input
-              type="text"
-              placeholder="Enter P2 decryption key/seed..."
-              value={decryptP2}
-              onChange={(e) => setDecryptP2(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: 13,
-                boxSizing: "border-box",
-                borderRadius: 4,
-                border: "1px solid #ccc",
-                background: "#ffffff",
-              }}
-            />
-          </div>
-
-          {/* Helper buttons for quick testing */}
-          <div
-            style={{
-              marginBottom: 14,
-              borderTop: "1px dashed #ccc",
-              paddingTop: 10,
-            }}
-          >
-            <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>
-              Quick Demo Actions:
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={pasteMatchingKeys}
-                style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
-                title="Fill with sender's exact P1 and P2 keys"
-              >
-                📋 Paste Matching Keys
-              </button>
-              <button
-                type="button"
-                onClick={pasteWrongP1}
-                style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
-                title="Test decryption failure with wrong P1"
-              >
-                ⚡ Wrong P1 Key
-              </button>
-              <button
-                type="button"
-                onClick={pasteWrongP2}
-                style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
-                title="Test decryption failure with wrong P2"
-              >
-                ⚡ Wrong P2 Key
-              </button>
-              <button
-                type="button"
-                onClick={clearDecryptInputs}
-                style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
-                title="Clear all decryption inputs"
-              >
-                🗑️ Clear
-              </button>
-            </div>
-          </div>
+          <button type="button" onClick={clearDecryptInputs}>
+            Clear receiver inputs
+          </button>
 
           <button
             onClick={() => handleUserDecrypt()}
@@ -586,11 +439,11 @@ export default function DRPEDemo() {
           </div>
           <ol style={{ paddingLeft: 18, margin: 0 }}>
             <li>
-              The sender encrypts the RGB cover image using spatial mask{" "}
-              <code>P₁</code> and frequency mask <code>P₂</code> derived from sender seeds and the predetermined base image.
+              The sender encrypts the RGB cover image using a secret key image and password. The backend derives independent spatial mask{" "}
+              <code>P₁</code> and frequency mask <code>P₂</code> values for this message and frame.
             </li>
             <li>
-              The receiver enters decryption keys <code>P₁</code> and <code>P₂</code> (or uses quick action buttons). The input boxes remain clean and empty after encryption until typed into or filled.
+              The receiver uploads the matching secret key image and enters the matching password. The message salt and frame metadata allow the same masks to be reproduced without transmitting the masks.
             </li>
             <li>
               The backend computes the reverse complex rotation:
@@ -606,43 +459,12 @@ export default function DRPEDemo() {
               </code>
             </li>
             <li>
-              If $P_1$ and $P_2$ match the encryption keys, the phase rotations cancel out, producing the original RGB cover image. If either key is wrong or modified, the output is un-recoverable phase noise.
+              If the image and password match, the phase rotations cancel out, producing the original RGB cover image. If either credential is wrong or modified, the output is unrecoverable phase noise.
             </li>
           </ol>
         </div>
       </section>
 
-      {/* Base image transparency */}
-      <section style={{ marginTop: 16 }}>
-        <details>
-          <summary style={{ cursor: "pointer", color: "#1f6feb" }}>
-            Show the predetermined base image
-          </summary>
-          <div
-            style={{
-              marginTop: 8,
-              display: "flex",
-              gap: 16,
-              alignItems: "flex-start",
-            }}
-          >
-            <ImagePanel
-              title="Predetermined base image"
-              src={baseImage}
-              height={160}
-              caption={
-                baseShape ? `${baseShape[0]}×${baseShape[1]} px RGB (${baseShape[2]} channels)` : ""
-              }
-            />
-            <p
-              style={{ fontSize: 12, color: "#555", maxWidth: 480, margin: 0 }}
-            >
-              This image is part of key derivation. Both sender and receiver use the
-              same base image; the seeds alone generate $P_1$ and $P_2$, which are then passed as-is into decryption.
-            </p>
-          </div>
-        </details>
-      </section>
     </div>
   );
 }

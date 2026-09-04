@@ -26,76 +26,45 @@ import hashlib
 
 import numpy as np
 
-from services.keys import derive_key
-
 
 # --- Mask generation -------------------------------------------------------
 
-def _shape_seed(base_image: np.ndarray, frame_index: int, shape: tuple[int, ...] | None = None) -> bytes:
-    """
-    A base-image-aware seed blob. We hash the base image and target shape so that two
-    different base images or shapes with the same input seed produce different phase masks.
-    """
-    shape_bytes = (shape[0].to_bytes(4, "big") + shape[1].to_bytes(4, "big")) if shape else b""
-    digest = hashlib.sha256(base_image.tobytes() + shape_bytes).digest()[:8]
-    return digest + int(frame_index).to_bytes(8, "big", signed=False)
+def mask_seed(material: bytes) -> int:
+    digest = hashlib.sha256(material).digest()
+    return int.from_bytes(digest[:16], "big")
 
 
 def generate_phase_masks(
     shape: tuple[int, ...],
-    base_image: np.ndarray,
-    seed_p1: str,
-    seed_p2: str,
-    frame_index: int = 0,
+    p1_material: bytes,
+    p2_material: bytes,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Deterministically generate P1 and P2 given a (base image, seed_p1, seed_p2, frame index).
+    rng_p1 = np.random.default_rng(mask_seed(p1_material))
+    rng_p2 = np.random.default_rng(mask_seed(p2_material))
 
-    Both masks are uniform in [0, 2π) and shape-matched to the cover image (RGB or grayscale).
-    P1 is derived from seed_p1 (applied in spatial domain before FFT).
-    P2 is derived from seed_p2 (applied in frequency domain after FFT).
+    p1 = rng_p1.uniform(
+        0.0,
+        2.0 * np.pi,
+        size=shape,
+    ).astype(np.float64)
 
-    Returns:
-        (P1, P2) — both shape `shape`, float64, values in [0, 2π).
-    """
-    blob = _shape_seed(base_image, frame_index, shape)
-    blob_int = int.from_bytes(blob[:8], "big")
-
-    # Generate P1 from seed_p1
-    base_seed_1 = derive_key(seed_p1, frame_index)
-    mixed_1 = base_seed_1 ^ blob_int ^ 0x50314D3150314D31  # Full 64-bit XOR tag for P1
-    rng_1 = np.random.default_rng(mixed_1)
-    p1 = rng_1.uniform(0.0, 2.0 * np.pi, size=shape).astype(np.float64)
-
-    # Generate P2 from seed_p2
-    base_seed_2 = derive_key(seed_p2, frame_index)
-    mixed_2 = base_seed_2 ^ blob_int ^ 0x50324D3250324D32  # Full 64-bit XOR tag for P2
-    rng_2 = np.random.default_rng(mixed_2)
-    p2 = rng_2.uniform(0.0, 2.0 * np.pi, size=shape).astype(np.float64)
+    p2 = rng_p2.uniform(
+        0.0,
+        2.0 * np.pi,
+        size=shape,
+    ).astype(np.float64)
 
     return p1, p2
-
+    
 
 # --- Encrypt / decrypt -----------------------------------------------------
 
 def drpe_encrypt(
     cover_image: np.ndarray,
-    base_image: np.ndarray,
-    seed_p1: str,
-    seed_p2: str,
-    frame_index: int = 0,
+    p1_material: bytes,
+    p2_material: bytes,
 ) -> dict:
     """
-    Encrypt an RGB or grayscale cover image using DRPE with dual seeds (seed_p1, seed_p2).
-
-    Args:
-        cover_image: float64 ndarray — the image to encrypt (RGB shape (H, W, 3) or 2D (H, W)).
-        base_image:  float64 ndarray — the predetermined base/reference image
-                     (used as part of key derivation).
-        seed_p1:     str — seed for spatial domain phase mask P1.
-        seed_p2:     str — seed for frequency domain phase mask P2.
-        frame_index: int — index of this image within a multi-image message.
-
     Returns:
         dict with keys:
             "complex"     — complex128 ndarray, the full complex ciphertext.
@@ -103,7 +72,11 @@ def drpe_encrypt(
                             |DRPE(cover)| produced after complex rotation.
             "p1", "p2"    — float64 ndarrays, the phase masks used.
     """
-    p1, p2 = generate_phase_masks(cover_image.shape, base_image, seed_p1, seed_p2, frame_index)
+    p1, p2 = generate_phase_masks(
+        cover_image.shape,
+        p1_material,
+        p2_material,
+    )
 
     # 1. Apply spatial phase mask P1 to cover image (complex rotation in spatial domain)
     cover_spatial = cover_image * np.exp(1j * p1)
@@ -155,10 +128,9 @@ def drpe_decrypt(
 
 def energy(image: np.ndarray) -> float:
     """
-    Σ(|pixel|²) over the image — the Parseval-relevant quantity. Theoretically
-    invariant between cover and DRPE ciphertext (up to floating-point precision).
+    Σ(pixel²) over the image — the Parseval-relevant quantity. Theoretically
+    invariant between cover and DRPE ciphertext (up to display-side clipping).
     Useful as a sanity-check readout in the demo.
     """
-    return float(np.sum(np.abs(image) ** 2))
-
+    return float(np.sum(image.astype(np.float64) ** 2))
 

@@ -17,12 +17,10 @@ import os
 # backend/config.py, so the data directory lives at backend/data/.
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_BACKEND_DIR, "data")
-BASE_IMAGE_PATH = os.path.join(DATA_DIR, "base_image.png")
 
 # --- Demo defaults ---------------------------------------------------------
 
 DEFAULT_SEED = "phase1-demo"
-DEFAULT_BASE_IMAGE_SIZE = 256  # square, used when we have to synthesize one
 
 # --- Phase 2 placeholders (intentionally unused in Phase 1) ----------------
 # The future module services/encoding/symbol_image.py will use these.
@@ -33,6 +31,10 @@ DEFAULT_BASE_IMAGE_SIZE = 256  # square, used when we have to synthesize one
 BLOCK_A_COORDS = (10, 10)
 # Top-left pixel of block B (row, col) on the base image.
 BLOCK_B_COORDS = (10, 50)
+# Top-left pixel of block C (row, col) on the base image.
+BLOCK_C_COORDS = (50, 10)
+# Top-left pixel of block D (row, col) on the base image.
+BLOCK_D_COORDS = (50, 50)
 # Per-block edge length in pixels.
 BLOCK_SIZE = 16
 # Brightness delta applied to each block (net change across both blocks = 0).

@@ -1,9 +1,11 @@
 import base64
 import io
+import hashlib
 
 import numpy as np
 from fastapi import UploadFile
 from PIL import Image
+
 
 
 async def file_to_array(
@@ -37,6 +39,16 @@ def array_to_base64(arr: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+def array_to_base64_preview(arr: np.ndarray, max_size: int = 64) -> str:
+    """Encode a resized PNG preview without changing the source array."""
+    clipped = np.clip(np.round(arr), 0, 255).astype(np.uint8)
+    image = Image.fromarray(clipped)
+    image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
 def complex_to_b64(c: np.ndarray) -> str:
     """Losslessly encode a complex128 numpy array to a base64 string."""
     return base64.b64encode(c.astype(np.complex128).tobytes()).decode("utf-8")
@@ -59,3 +71,32 @@ def b64_to_float(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
     return np.frombuffer(raw_bytes, dtype=np.float64).reshape(tuple(shape))
 
 
+
+def canonicalize_key_image(raw: bytes) -> np.ndarray:
+    """
+    Decode and normalize a key image to RGB uint8 pixels.
+    """
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    image = image.resize((256, 256), Image.Resampling.LANCZOS)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def hash_canonical_key_image(pixels: np.ndarray) -> bytes:
+    """
+    Hash canonical RGB uint8 pixels.
+    """
+    header = b"DRPE-KEY-IMAGE-v1"
+    shape = np.asarray(pixels.shape, dtype=np.uint32).tobytes()
+    return hashlib.sha256(
+        header + shape + pixels.tobytes()
+    ).digest()
+    
+
+async def key_image_digest(upload: UploadFile) -> bytes:
+    raw = await upload.read()
+
+    if not raw:
+        raise ValueError("Key image is empty.")
+
+    pixels = canonicalize_key_image(raw)
+    return hash_canonical_key_image(pixels)

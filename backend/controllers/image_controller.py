@@ -1,22 +1,23 @@
 """
-Orchestration layer for /api/encrypt, /api/decrypt, and /api/base-image.
+Orchestration layer for the current image encryption workflow.
 
-The controller is intentionally thin: it does file I/O, calls the pure
-DRPE service, manages the in-memory message store, and shapes the
-response. All real logic lives in services/.
+The controller does file I/O, calls the pure DRPE service, manages the
+in-memory message store, and shapes the responses. All real logic lives
+in services/.
 """
 
 from __future__ import annotations
+
+import base64
+import secrets
 
 import numpy as np
 from fastapi import Form, HTTPException, UploadFile
 
 from schemas.image_schema import (
-    BaseImageResponse,
     DecryptResponse,
     EncryptResponse,
 )
-from services.base_image import get_base_image
 from services.drpe import (
     drpe_decrypt,
     drpe_encrypt,
@@ -26,85 +27,136 @@ from services.drpe import (
 from services.image_utils import (
     array_to_base64,
     b64_to_complex,
-    b64_to_float,
     complex_to_b64,
     file_to_array,
-    float_to_b64,
+    key_image_digest,
 )
+from services.messages import Frame, add_frame, create_message, get_frame, get_message, new_message_id
+from services.keys import derive_image_password_keys
 
 
-import hashlib
-
-# Cover image is the *last* one we encrypted, kept only as an optional
-# fallback for single-client local testing. Production/multi-frame uses cover_hash.
+# Cover image is the *last* one we encrypted, kept for the "match with
+# cover" readout. Resets on every /api/encrypt call.
 _last_cover: np.ndarray | None = None
 
 
 async def encrypt_controller(
     cover_image: UploadFile,
-    seed_p1: str = Form(...),
-    seed_p2: str = Form(...),
+    secret_key_image: UploadFile,
+    secret_password: str,
+    message_id: str | None = None,
     frame_index: int = 0,
 ) -> EncryptResponse:
     """
-    Sender side. Reads the cover image, runs DRPE with the
-    predetermined base image + dual seeds (seed_p1, seed_p2) and frame_index,
-    and returns the complex ciphertext payload, phase masks P1/P2, display image, and cover_hash.
+    Sender side. Reads the cover and secret key image, derives per-frame
+    P1/P2 material, and returns the complex ciphertext plus display metadata.
     """
     global _last_cover
 
-    base = get_base_image()
     try:
         cover_arr = await file_to_array(cover_image, target_shape=None)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    if frame_index < 0:
+        raise HTTPException(status_code=400, detail="frame_index must be non-negative.")
+
+    secret_image_bytes = await secret_key_image.read()
+    if not secret_password:
+        raise HTTPException(status_code=400, detail="secret_password is required.")
+    await secret_key_image.seek(0)
     try:
-        out = drpe_encrypt(cover_arr, base, seed_p1, seed_p2, frame_index=frame_index)
+        image_digest = await key_image_digest(secret_key_image)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    salt = secrets.token_bytes(16)
+    generated_message_id = message_id or new_message_id()
+    await secret_key_image.seek(0)
+    p1_material, p2_material = derive_image_password_keys(
+        secret_password,
+        salt,
+        image_digest,
+        generated_message_id,
+        frame_index,
+    )
+
+    try:
+        out = drpe_encrypt(cover_arr, p1_material, p2_material)
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
     _last_cover = cover_arr
-    cover_hash = hashlib.sha256(cover_arr.tobytes()).hexdigest()
+
+    # Transition storage only: steps 1-3 will replace the legacy seeds with
+    # these uploaded key images and secret_password in the KDF.
+    message = create_message(
+        secret_key_image=secret_image_bytes,
+        secret_password=secret_password,
+        salt=salt,
+        message_id=generated_message_id,
+    )
 
     c_complex = out["complex"]
+    add_frame(
+        message,
+        Frame(
+            frame_index=frame_index,
+            ciphertext_complex=c_complex,
+            amplitude=out["amplitude"],
+        ),
+    )
     return EncryptResponse(
         ciphertext_b64=complex_to_b64(c_complex),
         ciphertext_shape=list(c_complex.shape),
-        p1_b64=float_to_b64(out["p1"]),
-        p2_b64=float_to_b64(out["p2"]),
         image=array_to_base64(out["amplitude"]),
-        energy=energy(c_complex),
+        energy=energy(out["amplitude"]),
         cover_energy=energy(cover_arr),
-        cover_hash=cover_hash,
-        frame_index=frame_index,
+        message_id=message.message_id,
+        salt_b64=base64.b64encode(salt).decode("ascii"),
     )
 
 
 async def decrypt_controller(
-    ciphertext_b64: str,
-    ciphertext_shape: list[int],
-    p1_b64: str | None = None,
-    p2_b64: str | None = None,
-    seed_p1: str | None = None,
-    seed_p2: str | None = None,
+    ciphertext_b64: str | None,
+    ciphertext_shape: list[int] | None,
+    secret_key_image: UploadFile,
+    secret_password: str,
+    salt_b64: str,
     frame_index: int = 0,
-    cover_hash: str | None = None,
+    message_id: str | None = None,
 ) -> DecryptResponse:
     """
-    Receiver side. Decodes the complex ciphertext payload and inverts using
-    either user-provided seeds (seed_p1, seed_p2) or direct phase masks (p1_b64, p2_b64).
+    Receiver side. Reproduces the P1/P2 materials from the receiver key image,
+    password, salt, message ID, and frame index, then decrypts the ciphertext.
     """
     try:
-        ciphertext_complex = b64_to_complex(ciphertext_b64, tuple(ciphertext_shape))
-        if seed_p1 is not None and seed_p2 is not None:
-            base = get_base_image()
-            p1, p2 = generate_phase_masks(tuple(ciphertext_shape), base, seed_p1, seed_p2, frame_index=frame_index)
-        elif p1_b64 and p2_b64:
-            p1 = b64_to_float(p1_b64, tuple(ciphertext_shape))
-            p2 = b64_to_float(p2_b64, tuple(ciphertext_shape))
+        if message_id:
+            message = get_message(message_id)
+            frame = get_frame(message, frame_index)
+            ciphertext_complex = frame.ciphertext_complex
+            ciphertext_shape = list(ciphertext_complex.shape)
+        elif ciphertext_b64 and ciphertext_shape:
+            ciphertext_complex = b64_to_complex(ciphertext_b64, tuple(ciphertext_shape))
         else:
-            raise ValueError("Either (seed_p1, seed_p2) or (p1_b64, p2_b64) must be provided.")
+            raise ValueError("message_id is required when ciphertext is not supplied")
+        receiver_image_bytes = await secret_key_image.read()
+        await secret_key_image.seek(0)
+        image_digest = await key_image_digest(secret_key_image)
+        if message_id:
+            message.receiver_secret_key_image = receiver_image_bytes
+            message.receiver_password = secret_password
+        salt = base64.b64decode(salt_b64, validate=True)
+        p1_material, p2_material = derive_image_password_keys(
+            secret_password,
+            salt,
+            image_digest,
+            message_id or "",
+            frame_index,
+        )
+        p1, p2 = generate_phase_masks(
+            tuple(ciphertext_shape), p1_material, p2_material
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid ciphertext or decryption parameters: {e}")
 
@@ -118,10 +170,7 @@ async def decrypt_controller(
         raise HTTPException(status_code=501, detail=str(e))
 
     match = False
-    if cover_hash:
-        rec_hash = hashlib.sha256(recovered.tobytes()).hexdigest()
-        match = (rec_hash == cover_hash)
-    elif _last_cover is not None and _last_cover.shape == recovered.shape:
+    if _last_cover is not None and _last_cover.shape == recovered.shape:
         # Same-mask decrypt matches original cover exactly with zero pixel error (atol=1e-15).
         match = bool(np.allclose(_last_cover, recovered, atol=1e-15))
 
@@ -131,13 +180,4 @@ async def decrypt_controller(
         match_with_cover=match,
     )
 
-
-
-def get_base_image_controller() -> BaseImageResponse:
-    """Returns the predetermined base image so the demo can show it."""
-    base = get_base_image()
-    return BaseImageResponse(
-        image=array_to_base64(base),
-        shape=list(base.shape),
-    )
 

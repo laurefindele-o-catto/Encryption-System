@@ -3,19 +3,13 @@ Thin route handlers. The controller does the work; the router just
 unpacks the request and returns the schema object.
 """
 
-from fastapi import APIRouter, Form, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 
 from controllers.image_controller import (
     decrypt_controller,
     encrypt_controller,
-    get_base_image_controller,
 )
-from schemas.image_schema import (
-    BaseImageResponse,
-    DecryptRequest,
-    DecryptResponse,
-    EncryptResponse,
-)
+from schemas.image_schema import DecryptResponse, EncryptResponse
 
 router = APIRouter(prefix="/api")
 
@@ -23,38 +17,51 @@ router = APIRouter(prefix="/api")
 @router.post("/encrypt", response_model=EncryptResponse)
 async def encrypt(
     cover_image: UploadFile,
-    seed_p1: str = Form(...),
-    seed_p2: str = Form(...),
+    secret_key_image: UploadFile = File(...),
+    secret_password: str = Form(...),
+    message_id: str | None = Form(None),
     frame_index: int = Form(0),
 ) -> EncryptResponse:
     """
-    Encrypt `cover_image` with the predetermined base image + `seed_p1` and `seed_p2`.
-    Returns the (visually noise-like) ciphertext image, the ciphertext payload,
-    and energies for the Parseval readout.
+    Encrypt `cover_image` using the uploaded secret image and password.
+    Returns the complex ciphertext and metadata needed for decryption.
     """
-    return await encrypt_controller(cover_image, seed_p1, seed_p2, frame_index=frame_index)
-
-
-@router.post("/decrypt", response_model=DecryptResponse)
-async def decrypt(req: DecryptRequest) -> DecryptResponse:
-    """
-    Decrypt the complex ciphertext payload using user-provided seeds or phase masks.
-    """
-    return await decrypt_controller(
-        req.ciphertext_b64,
-        req.ciphertext_shape,
-        p1_b64=req.p1_b64,
-        p2_b64=req.p2_b64,
-        seed_p1=req.seed_p1,
-        seed_p2=req.seed_p2,
-        frame_index=req.frame_index,
-        cover_hash=req.cover_hash,
+    return await encrypt_controller(
+        cover_image,
+        secret_key_image=secret_key_image,
+        secret_password=secret_password,
+        message_id=message_id,
+        frame_index=frame_index,
     )
 
 
+@router.post("/decrypt-with-key-images", response_model=DecryptResponse)
+async def decrypt_with_key_images(
+    ciphertext_b64: str | None = Form(None),
+    ciphertext_shape: str | None = Form(None),
+    secret_key_image: UploadFile = File(...),
+    secret_password: str = Form(...),
+    frame_index: int = Form(0),
+    message_id: str = Form(...),
+    salt_b64: str = Form(...),
+) -> DecryptResponse:
+    """Decrypt using the receiver's secret image and password."""
+    import json
 
+    try:
+        shape = json.loads(ciphertext_shape) if ciphertext_shape else None
+    except json.JSONDecodeError as exc:
+        from fastapi import HTTPException
 
-@router.get("/base-image", response_model=BaseImageResponse)
-def base_image() -> BaseImageResponse:
-    """Returns the predetermined base/reference image (demo transparency)."""
-    return get_base_image_controller()
+        raise HTTPException(status_code=400, detail="ciphertext_shape must be JSON.") from exc
+
+    return await decrypt_controller(
+        ciphertext_b64,
+        shape,
+        secret_key_image=secret_key_image,
+        secret_password=secret_password,
+        salt_b64=salt_b64,
+        frame_index=frame_index,
+        message_id=message_id,
+    )
+
