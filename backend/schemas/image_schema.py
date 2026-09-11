@@ -12,8 +12,6 @@ class ImageResponse(BaseModel):
 
 class EncryptResponse(BaseModel):
     """Returned by POST /api/encrypt."""
-    ciphertext_b64: str  # Lossless base64-encoded complex128 array
-    ciphertext_shape: list[int]  # [height, width, channels] or [height, width]
     image: str          # base64-encoded PNG of |ciphertext| (display image)
     energy: float       # Σ(pixel²) over the displayed amplitude
     cover_energy: float  # Σ(pixel²) over the original cover (for Parseval readout)
@@ -44,5 +42,25 @@ class TextEncryptResponse(BaseModel):
     frame_count: int
     base_image_shape: list[int]
     previews: list[TextFramePreview] = []
+
+
+class TextDecryptedFrame(BaseModel):
+    """Per-frame diagnostic information returned during text decryption."""
+    frame_index: int
+    symbol: int
+    symbol_name: str
+
+
+class TextDecryptResponse(BaseModel):
+    """Returned by POST /api/text/decrypt."""
+    message_id: str
+    text: str
+    morse: str
+    symbols: list[int]
+    frame_count: int
+    success: bool
+    image: str | None = None
+    frames: list[TextDecryptedFrame] = []
+
 
 
