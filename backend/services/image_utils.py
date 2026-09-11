@@ -39,7 +39,7 @@ def array_to_base64(arr: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def array_to_base64_preview(arr: np.ndarray, max_size: int = 64) -> str:
+def array_to_base64_preview(arr: np.ndarray, max_size: int = 512) -> str:
     """Encode a resized PNG preview without changing the source array."""
     clipped = np.clip(np.round(arr), 0, 255).astype(np.uint8)
     image = Image.fromarray(clipped)
@@ -49,26 +49,7 @@ def array_to_base64_preview(arr: np.ndarray, max_size: int = 64) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def complex_to_b64(c: np.ndarray) -> str:
-    """Losslessly encode a complex128 numpy array to a base64 string."""
-    return base64.b64encode(c.astype(np.complex128).tobytes()).decode("utf-8")
 
-
-def b64_to_complex(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
-    """Losslessly decode a base64 string back into a complex128 numpy array."""
-    raw_bytes = base64.b64decode(b64_str)
-    return np.frombuffer(raw_bytes, dtype=np.complex128).reshape(tuple(shape))
-
-
-def float_to_b64(arr: np.ndarray) -> str:
-    """Losslessly encode a float64 numpy array (e.g., P1 or P2 mask) to a base64 string."""
-    return base64.b64encode(arr.astype(np.float64).tobytes()).decode("utf-8")
-
-
-def b64_to_float(b64_str: str, shape: tuple[int, ...]) -> np.ndarray:
-    """Losslessly decode a base64 string back into a float64 numpy array."""
-    raw_bytes = base64.b64decode(b64_str)
-    return np.frombuffer(raw_bytes, dtype=np.float64).reshape(tuple(shape))
 
 
 

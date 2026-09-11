@@ -18,8 +18,8 @@ from fastapi.testclient import TestClient
 
 from main import app
 from services.drpe import drpe_decrypt, drpe_encrypt, energy
-from services.image_utils import float_to_b64
 from services.keys import derive_key
+
 
 
 client = TestClient(app)
@@ -87,7 +87,7 @@ def test_api_health():
 
 
 def test_api_encrypt_decrypt_flow():
-    """Verify end-to-end API encrypt and decrypt workflow with p1_b64 and p2_b64 payload."""
+    """Verify end-to-end API encrypt and decrypt workflow with key image and password."""
     rng = np.random.default_rng(42)
     random_pixels = rng.integers(0, 256, size=(300, 300, 3), dtype=np.uint8)
     img = Image.fromarray(random_pixels, mode="RGB")
@@ -95,78 +95,59 @@ def test_api_encrypt_decrypt_flow():
     img.save(buf, format="PNG")
     buf.seek(0)
 
-    # 1. POST /api/encrypt with seed_p1 and seed_p2
+    key_img = Image.new("RGB", (64, 64), color=(80, 120, 160))
+    key_buf = io.BytesIO()
+    key_img.save(key_buf, format="PNG")
+    key_buf.seek(0)
+
+    # 1. POST /api/encrypt with secret_password and secret_key_image
     response = client.post(
         "/api/encrypt",
-        data={"seed_p1": "api-p1-seed", "seed_p2": "api-p2-seed"},
-        files={"cover_image": ("test.png", buf, "image/png")},
+        data={"secret_password": "test-password-123"},
+        files={
+            "cover_image": ("test.png", buf, "image/png"),
+            "secret_key_image": ("key.png", key_buf, "image/png"),
+        },
     )
     assert response.status_code == 200
     data = response.json()
-    assert "ciphertext_b64" in data
-    assert "ciphertext_shape" in data
-    assert "p1_b64" in data
-    assert "p2_b64" in data
     assert "image" in data
+    assert "message_id" in data
+    assert "salt_b64" in data
     assert data["cover_energy"] > 0
     
-    cb64 = data["ciphertext_b64"]
-    cshape = data["ciphertext_shape"]
-    p1_b64 = data["p1_b64"]
-    p2_b64 = data["p2_b64"]
+    msg_id = data["message_id"]
 
-    # 2. POST /api/decrypt with correct masks
+    # 2. POST /api/decrypt-with-key-images with correct password and key image
+    key_buf.seek(0)
     dec_response = client.post(
-        "/api/decrypt",
-        json={
-            "ciphertext_b64": cb64,
-            "ciphertext_shape": cshape,
-            "p1_b64": p1_b64,
-            "p2_b64": p2_b64,
+        "/api/decrypt-with-key-images",
+        data={
+            "message_id": msg_id,
+            "secret_password": "test-password-123",
+        },
+        files={
+            "secret_key_image": ("key.png", key_buf, "image/png"),
         },
     )
     assert dec_response.status_code == 200
     dec_data = dec_response.json()
     assert dec_data["match_with_cover"] is True
 
-    # 3. POST /api/decrypt with wrong P1 mask
-    wrong_p1 = rng.uniform(0, 2 * np.pi, size=cshape)
-    wrong_p1_b64 = float_to_b64(wrong_p1)
-    wrong_p1_response = client.post(
-        "/api/decrypt",
-        json={
-            "ciphertext_b64": cb64,
-            "ciphertext_shape": cshape,
-            "p1_b64": wrong_p1_b64,
-            "p2_b64": p2_b64,
+    # 3. POST /api/decrypt-with-key-images with wrong password
+    key_buf.seek(0)
+    wrong_pw_response = client.post(
+        "/api/decrypt-with-key-images",
+        data={
+            "message_id": msg_id,
+            "secret_password": "wrong-password",
+        },
+        files={
+            "secret_key_image": ("key.png", key_buf, "image/png"),
         },
     )
-    # 4. POST /api/decrypt with correct seeds
-    dec_seed_response = client.post(
-        "/api/decrypt",
-        json={
-            "ciphertext_b64": cb64,
-            "ciphertext_shape": cshape,
-            "seed_p1": "api-p1-seed",
-            "seed_p2": "api-p2-seed",
-        },
-    )
-    assert dec_seed_response.status_code == 200
-    assert dec_seed_response.json()["match_with_cover"] is True
-
-    # 5. POST /api/decrypt with wrong seed
-    wrong_seed_response = client.post(
-        "/api/decrypt",
-        json={
-            "ciphertext_b64": cb64,
-            "ciphertext_shape": cshape,
-            "seed_p1": "wrong-seed",
-            "seed_p2": "api-p2-seed",
-        },
-    )
-    assert wrong_seed_response.status_code == 200
-    assert wrong_seed_response.json()["match_with_cover"] is False
-
+    assert wrong_pw_response.status_code == 200
+    assert wrong_pw_response.json()["match_with_cover"] is False
 
 
 def test_variable_size_image_encryption():
@@ -187,23 +168,34 @@ def test_variable_size_image_encryption():
     img.save(buf, format="PNG")
     buf.seek(0)
 
+    key_img = Image.new("RGB", (64, 64), color=(20, 40, 60))
+    key_buf = io.BytesIO()
+    key_img.save(key_buf, format="PNG")
+    key_buf.seek(0)
+
     res = client.post(
         "/api/encrypt",
-        data={"seed_p1": "var-api-p1", "seed_p2": "var-api-p2"},
-        files={"cover_image": ("rect.png", buf, "image/png")},
+        data={"secret_password": "var-password"},
+        files={
+            "cover_image": ("rect.png", buf, "image/png"),
+            "secret_key_image": ("key.png", key_buf, "image/png"),
+        },
     )
     assert res.status_code == 200
     res_data = res.json()
 
+    key_buf.seek(0)
     dec_res = client.post(
-        "/api/decrypt",
-        json={
-            "ciphertext_b64": res_data["ciphertext_b64"],
-            "ciphertext_shape": res_data["ciphertext_shape"],
-            "p1_b64": res_data["p1_b64"],
-            "p2_b64": res_data["p2_b64"],
+        "/api/decrypt-with-key-images",
+        data={
+            "message_id": res_data["message_id"],
+            "secret_password": "var-password",
+        },
+        files={
+            "secret_key_image": ("key.png", key_buf, "image/png"),
         },
     )
     assert dec_res.status_code == 200
     assert dec_res.json()["match_with_cover"] is True
+
 

@@ -10,6 +10,15 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
   const [status, setStatus] = useState("Ready to send.");
   const [busy, setBusy] = useState(false);
   const [secretText, setSecretText] = useState("");
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [lightboxImage, setLightboxImage] = useState(null);
+
+  const isTextPacket = packet?.messageType === "text";
+  const framePreviews = packet?.previews || [];
+  const currentFrame = isTextPacket ? framePreviews[frameIndex] : null;
+  const previewImage = isTextPacket
+    ? (currentFrame?.image || packet?.image || null)
+    : packet?.image;
 
   const handleSend = async () => {
     if (!coverImage) {
@@ -43,10 +52,7 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
 
       const payload = {
         messageType: "image",
-        ciphertextB64: res.data.ciphertext_b64,
-        ciphertextShape: res.data.ciphertext_shape,
         messageId: res.data.message_id,
-        saltB64: res.data.salt_b64,
         image: res.data.image,
       };
 
@@ -103,8 +109,10 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
         symbols: res.data.symbols,
         baseImageShape: res.data.base_image_shape,
         previews: res.data.previews || [],
+        image: res.data.previews?.[0]?.image || null,
       };
 
+      setFrameIndex(0);
       onPacketReady(textPacket);
       setStatus("Secret text encrypted and ready for Bob to receive.");
     } catch (error) {
@@ -299,7 +307,7 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
         <div
           style={{
             marginTop: 18,
-            minHeight: 260,
+            minHeight: 320,
             background: "rgba(0,0,0,0.38)",
             border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 16,
@@ -308,26 +316,120 @@ export default function AlicePage({ packet, onPacketReady, revealActive, setReve
             justifyContent: "center",
             position: "relative",
             overflow: "hidden",
+            padding: 8,
+            boxSizing: "border-box",
           }}
         >
-          {packet?.image ? (
+          {previewImage ? (
             <img
-              src={`data:image/png;base64,${packet.image}`}
+              src={`data:image/png;base64,${previewImage}`}
               alt="Encrypted packet preview"
-              style={{ maxWidth: "100%", maxHeight: 260, borderRadius: 10 }}
+              onClick={() => setLightboxImage(`data:image/png;base64,${previewImage}`)}
+              style={{
+                width: "min(100%, 500px)",
+                maxHeight: 420,
+                objectFit: "contain",
+                borderRadius: 10,
+                cursor: "zoom-in",
+                display: "block",
+              }}
             />
           ) : (
             <div style={{ color: "#859ab1", fontSize: 14 }}>No packet ready yet.</div>
           )}
         </div>
 
+        {isTextPacket && framePreviews.length > 1 && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "10px 14px",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10,
+              background: "rgba(255,255,255,0.03)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <span style={{ fontSize: 12, color: "#aebbd0" }}>
+              Frame {frameIndex + 1} / {framePreviews.length}
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setFrameIndex((i) => Math.max(0, i - 1))}
+                disabled={frameIndex === 0}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#f4f8ff",
+                  cursor: frameIndex === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                &#8592;
+              </button>
+              <button
+                type="button"
+                onClick={() => setFrameIndex((i) => Math.min(framePreviews.length - 1, i + 1))}
+                disabled={frameIndex === framePreviews.length - 1}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#f4f8ff",
+                  cursor: frameIndex === framePreviews.length - 1 ? "not-allowed" : "pointer",
+                }}
+              >
+                &#8594;
+              </button>
+            </div>
+          </div>
+        )}
+
         <div style={{ marginTop: 18, color: "#dceaf7", lineHeight: 1.6 }}>
           <div><strong>Message ID:</strong> {packet?.messageId || "—"}</div>
-          <div><strong>Original image:</strong> {coverImage ? "ready" : "waiting"}</div>
+          <div><strong>Original image:</strong> {(mode === "text" ? baseImage : coverImage) ? "ready" : "waiting"}</div>
           <div><strong>Key material:</strong> {keyFile ? "ready" : "waiting"}</div>
+          {isTextPacket && packet && (
+            <>
+              <div><strong>Frames:</strong> {packet.frameCount || framePreviews.length}</div>
+              <div><strong>Morse:</strong> <span style={{ fontFamily: "monospace", letterSpacing: 1 }}>{packet.morse || "—"}</span></div>
+            </>
+          )}
           <div><strong>Reveal state:</strong> {revealActive ? "active" : "clear"}</div>
         </div>
       </div>
+
+      {lightboxImage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Expanded packet preview"
+          onClick={() => setLightboxImage(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            background: "rgba(0,0,0,0.86)",
+            cursor: "zoom-out",
+          }}
+        >
+          <img
+            src={lightboxImage}
+            alt="Expanded packet preview"
+            style={{ maxWidth: "min(92vw, 1100px)", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -93,8 +93,6 @@ export default function DRPEDemo() {
     form.append("secret_password", secretPassword);
     try {
       const res = await api.post("/encrypt", form);
-      setCiphertextB64(res.data.ciphertext_b64);
-      setCiphertextShape(res.data.ciphertext_shape);
       setCiphertext(res.data.image);
       setCoverEnergy(res.data.cover_energy);
       setCipherEnergy(res.data.energy);
@@ -111,16 +109,20 @@ export default function DRPEDemo() {
   };
 
   const handleUserDecrypt = async () => {
-    if (!ciphertextB64 || !ciphertextShape) {
+    if (!messageId) {
       setError("Please encrypt an image first.");
       return;
     }
     if (!receiverSecretKeyImage) {
-      setError("Please upload the receiver secret key image before decrypting.");
+      setError(
+        "Please upload the receiver secret key image before decrypting."
+      );
       return;
     }
     if (!receiverPassword || !saltB64 || !messageId) {
-      setError("Please provide the receiver password and encrypt an image first.");
+      setError(
+        "Please provide the receiver password and encrypt an image first."
+      );
       return;
     }
     setError(null);
@@ -162,6 +164,15 @@ export default function DRPEDemo() {
   const clearDecryptInputs = () => {
     setReceiverSecretKeyImage(null);
     setReceiverPassword("");
+  };
+
+  const copySenderCredentials = () => {
+    if (secretKeyImage) {
+      setReceiverSecretKeyImage(secretKeyImage);
+    }
+    if (secretPassword) {
+      setReceiverPassword(secretPassword);
+    }
   };
 
   return (
@@ -238,28 +249,57 @@ export default function DRPEDemo() {
           </div>
 
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 4,
+              }}
+            >
               Secret Key Image
             </label>
-            <input type="file" accept="image/*" onChange={(e) => setSecretKeyImage(e.target.files[0] || null)} />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setSecretKeyImage(e.target.files[0] || null)}
+            />
+            {secretKeyImage && (
+              <div style={{ marginTop: 4, fontSize: 12, color: "#0958d9" }}>
+                ✓ Selected: <strong>{secretKeyImage.name}</strong>
+              </div>
+            )}
           </div>
 
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 4,
+              }}
+            >
               Secret Password
             </label>
             <input
               type="password"
               value={secretPassword}
               onChange={(e) => setSecretPassword(e.target.value)}
-              placeholder="Optional until KDF is implemented"
-              style={{ width: "100%", padding: "6px 10px", boxSizing: "border-box" }}
+              placeholder="Enter secret password (e.g. pass123)"
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                boxSizing: "border-box",
+              }}
             />
           </div>
 
           <button
             onClick={handleEncrypt}
-            disabled={!coverFile || busy}
+            disabled={!coverFile || !secretKeyImage || !secretPassword || busy}
             style={{
               width: "100%",
               fontWeight: 600,
@@ -268,8 +308,14 @@ export default function DRPEDemo() {
               color: "#ffffff",
               border: "none",
               borderRadius: 4,
-              cursor: coverFile && !busy ? "pointer" : "not-allowed",
-              opacity: coverFile && !busy ? 1 : 0.6,
+              cursor:
+                coverFile && secretKeyImage && secretPassword && !busy
+                  ? "pointer"
+                  : "not-allowed",
+              opacity:
+                coverFile && secretKeyImage && secretPassword && !busy
+                  ? 1
+                  : 0.6,
             }}
           >
             {busy ? "Encrypting..." : "🔒 Encrypt Cover Image (RGB)"}
@@ -285,44 +331,121 @@ export default function DRPEDemo() {
             background: "#fafafa",
           }}
         >
-          <h3
+          <div
             style={{
-              marginTop: 0,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
               marginBottom: 12,
-              fontSize: 16,
-              color: "#1f2937",
             }}
           >
-            2. Receiver Setup (Decryption Keys P₁ & P₂)
-          </h3>
-
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
-              Receiver Secret Key Image
-            </label>
-            <input type="file" accept="image/*" onChange={(e) => setReceiverSecretKeyImage(e.target.files[0] || null)} />
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 16,
+                color: "#1f2937",
+              }}
+            >
+              2. Receiver Setup (Decryption Keys P₁ & P₂)
+            </h3>
           </div>
 
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 4,
+              }}
+            >
+              Receiver Secret Key Image
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) =>
+                setReceiverSecretKeyImage(e.target.files[0] || null)
+              }
+            />
+            {receiverSecretKeyImage && (
+              <div style={{ marginTop: 4, fontSize: 12, color: "#0958d9" }}>
+                ✓ Selected: <strong>{receiverSecretKeyImage.name}</strong>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 4,
+              }}
+            >
               Receiver Secret Password
             </label>
             <input
               type="password"
               value={receiverPassword}
               onChange={(e) => setReceiverPassword(e.target.value)}
-              placeholder="Must match sender password"
-              style={{ width: "100%", padding: "6px 10px", boxSizing: "border-box" }}
+              placeholder="Must match sender password for correct decryption"
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                boxSizing: "border-box",
+              }}
             />
           </div>
 
-          <button type="button" onClick={clearDecryptInputs}>
-            Clear receiver inputs
-          </button>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={copySenderCredentials}
+              disabled={!secretKeyImage && !secretPassword}
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                fontSize: 12,
+                cursor:
+                  secretKeyImage || secretPassword ? "pointer" : "not-allowed",
+                background: "#f0f6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1e40af",
+                borderRadius: 4,
+                fontWeight: 500,
+              }}
+            >
+              📋 Autofill Matching Keys
+            </button>
+            <button
+              type="button"
+              onClick={clearDecryptInputs}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                cursor: "pointer",
+                background: "#f3f4f6",
+                border: "1px solid #d1d5db",
+                color: "#374151",
+                borderRadius: 4,
+              }}
+            >
+              Clear
+            </button>
+          </div>
 
           <button
             onClick={() => handleUserDecrypt()}
-            disabled={!ciphertextB64 || busy}
+            disabled={
+              !messageId ||
+              !receiverSecretKeyImage ||
+              !receiverPassword ||
+              busy
+            }
             style={{
               width: "100%",
               fontWeight: 600,
@@ -331,15 +454,26 @@ export default function DRPEDemo() {
               color: "#ffffff",
               border: "none",
               borderRadius: 4,
-              cursor: ciphertextB64 && !busy ? "pointer" : "not-allowed",
-              opacity: ciphertextB64 && !busy ? 1 : 0.6,
+              cursor:
+                messageId &&
+                receiverSecretKeyImage &&
+                receiverPassword &&
+                !busy
+                  ? "pointer"
+                  : "not-allowed",
+              opacity:
+                messageId &&
+                receiverSecretKeyImage &&
+                receiverPassword &&
+                !busy
+                  ? 1
+                  : 0.6,
             }}
           >
             {busy ? "Decrypting..." : "🔓 Decrypt Image"}
           </button>
         </div>
       </section>
-
 
       {error && (
         <div
@@ -439,11 +573,15 @@ export default function DRPEDemo() {
           </div>
           <ol style={{ paddingLeft: 18, margin: 0 }}>
             <li>
-              The sender encrypts the RGB cover image using a secret key image and password. The backend derives independent spatial mask{" "}
-              <code>P₁</code> and frequency mask <code>P₂</code> values for this message and frame.
+              The sender encrypts the RGB cover image using a secret key image
+              and password. The backend derives independent spatial mask{" "}
+              <code>P₁</code> and frequency mask <code>P₂</code> values for this
+              message and frame.
             </li>
             <li>
-              The receiver uploads the matching secret key image and enters the matching password. The message salt and frame metadata allow the same masks to be reproduced without transmitting the masks.
+              The receiver uploads the matching secret key image and enters the
+              matching password. The message salt and frame metadata allow the
+              same masks to be reproduced without transmitting the masks.
             </li>
             <li>
               The backend computes the reverse complex rotation:
@@ -455,16 +593,18 @@ export default function DRPEDemo() {
                   padding: "4px 8px",
                 }}
               >
-                FFT₂D(Ciphertext) · e<sup>-jP₂</sup> → IFFT₂D → · e<sup>-jP₁</sup>
+                FFT₂D(Ciphertext) · e<sup>-jP₂</sup> → IFFT₂D → · e
+                <sup>-jP₁</sup>
               </code>
             </li>
             <li>
-              If the image and password match, the phase rotations cancel out, producing the original RGB cover image. If either credential is wrong or modified, the output is unrecoverable phase noise.
+              If the image and password match, the phase rotations cancel out,
+              producing the original RGB cover image. If either credential is
+              wrong or modified, the output is unrecoverable phase noise.
             </li>
           </ol>
         </div>
       </section>
-
     </div>
   );
 }
@@ -476,4 +616,3 @@ function formatEnergy(e) {
   if (e > 1e3) return (e / 1e3).toFixed(3) + " k";
   return e.toFixed(2);
 }
-
