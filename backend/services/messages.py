@@ -46,7 +46,7 @@ class Message:
     frames: list[Frame] = field(default_factory=list)
 
 
-# In-memory store. Restarting the server clears it (intentional for the demo).
+# In-memory store. Restarting the server clears it.
 _messages: dict[str, Message] = {}
 
 # Monotonic counter for unique message IDs.

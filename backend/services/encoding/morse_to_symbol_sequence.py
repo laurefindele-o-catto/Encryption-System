@@ -17,6 +17,8 @@ SYMBOL_MAP = {
     '/': SymbolState.WORD_GAP,
 }
 
+REVERSE_SYMBOL_MAP = {state: ch for ch, state in SYMBOL_MAP.items()}
+
 
 def morse_to_symbol_sequence(morse: str) -> list[SymbolState]:
     """
@@ -24,3 +26,11 @@ def morse_to_symbol_sequence(morse: str) -> list[SymbolState]:
     text_to_morse) into SymbolState values, one per frame.
     """
     return [SYMBOL_MAP[ch] for ch in morse]
+
+
+def symbol_sequence_to_morse(symbols: list[SymbolState | int]) -> str:
+    """
+    Inverse of morse_to_symbol_sequence. Maps ordered SymbolState values
+    back into a single flat Morse string.
+    """
+    return "".join(REVERSE_SYMBOL_MAP[SymbolState(s)] for s in symbols)
