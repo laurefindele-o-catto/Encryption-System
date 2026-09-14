@@ -6,8 +6,14 @@ import base64
 
 from fastapi import HTTPException, UploadFile
 
-from schemas.image_schema import TextEncryptResponse, TextFramePreview
+from schemas.image_schema import (
+    TextDecryptResponse,
+    TextDecryptedFrame,
+    TextEncryptResponse,
+    TextFramePreview,
+)
 from services.image_utils import file_to_array
+from services.text_decryption import decrypt_text_message
 from services.text_encryption import encrypt_text_message
 
 
@@ -42,4 +48,37 @@ async def encrypt_text_controller(
         frame_count=result["frame_count"],
         base_image_shape=result["base_image_shape"],
         previews=previews,
+    )
+
+
+async def decrypt_text_controller(
+    message_id: str,
+    secret_key_image: UploadFile,
+    secret_password: str,
+) -> TextDecryptResponse:
+    """Read Bob's uploads and decrypt the stored text message frames."""
+    try:
+        key_image_bytes = await secret_key_image.read()
+        result = decrypt_text_message(
+            message_id=message_id,
+            secret_key_image=key_image_bytes,
+            secret_password=secret_password,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Text decryption failed: {exc}") from exc
+
+    frames = [TextDecryptedFrame(**frame) for frame in result["frames"]]
+    return TextDecryptResponse(
+        message_id=result["message_id"],
+        text=result["text"],
+        morse=result["morse"],
+        symbols=result["symbols"],
+        frame_count=result["frame_count"],
+        success=result["success"],
+        image=result.get("image"),
+        frames=frames,
     )
