@@ -79,5 +79,10 @@ def derive_image_password_keys(
     p2_material = derive_frame_key(
         master_key, message_id, frame_index, b"DRPE/P2",
     )
-    
+
     return p1_material, p2_material
+
+
+def derive_key(seed: str, frame_index: int = 0) -> bytes:
+    """Legacy helper calculating SHA-256 of f"{seed}:{frame_index}"."""
+    return hashlib.sha256(f"{seed}:{frame_index}".encode("utf-8")).digest()

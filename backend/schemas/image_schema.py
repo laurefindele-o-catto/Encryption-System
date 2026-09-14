@@ -63,4 +63,68 @@ class TextDecryptResponse(BaseModel):
     frames: list[TextDecryptedFrame] = []
 
 
+class BasicEnergyFramePreview(BaseModel):
+    """Preview info for basic energy encrypted frame."""
+    frame_index: int
+    image: str
+    energy: float
+    symbol: int
+    symbol_name: str
+
+
+class BasicEnergyEncryptResponse(BaseModel):
+    """Returned by POST /api/text/basic-energy/encrypt."""
+    message_id: str
+    salt_b64: str
+    morse: str
+    symbols: list[int]
+    frame_count: int
+    base_image_shape: list[int]
+    thresholds: list[float] = []
+    energy_levels: list[float] = []
+    previews: list[BasicEnergyFramePreview] = []
+
+
+class BasicEnergyDecryptedFrame(BaseModel):
+    """Per-frame diagnostic returned during normal DRPE decryption."""
+    frame_index: int
+    symbol: int
+    symbol_name: str
+
+
+class BasicEnergyDecryptResponse(BaseModel):
+    """Returned by POST /api/text/basic-energy/decrypt."""
+    message_id: str
+    text: str
+    morse: str
+    symbols: list[int]
+    frame_count: int
+    success: bool
+    image: str | None = None
+    frames: list[BasicEnergyDecryptedFrame] = []
+
+
+class BasicEnergyPredictedFrame(BaseModel):
+    """Per-frame energy prediction detail."""
+    frame_index: int
+    energy: float
+    predicted_symbol: int
+    symbol_name: str
+
+
+class BasicEnergyPredictResponse(BaseModel):
+    """Returned by POST /api/text/basic-energy/predict (Zero Decryption)."""
+    message_id: str
+    predicted_text: str
+    predicted_morse: str
+    predicted_symbols: list[int]
+    frame_count: int
+    thresholds: list[float] = []
+    energy_levels: list[float] = []
+    frame_energies: list[float] = []
+    frames: list[BasicEnergyPredictedFrame] = []
+    success: bool
+    bypassed_decryption: bool = True
+
+
 
