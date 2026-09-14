@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
 import api from "../api.js";
 
-export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, setRevealActive }) {
+export default function BobPage({
+  packet,
+  onSuccessfulDecrypt,
+  revealActive,
+  setRevealActive,
+}) {
   const [keyFile, setKeyFile] = useState(null);
-  const [password, setPassword] = useState("phase1-demo");
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState("Waiting for Alice packet.");
   const [busy, setBusy] = useState(false);
   const [decryptedImage, setDecryptedImage] = useState(null);
@@ -15,8 +20,12 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
   const [lightboxImage, setLightboxImage] = useState(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [outputView, setOutputView] = useState("recovered");
+  const [decryptionMethod, setDecryptionMethod] = useState(null);
+  const [predictedEnergies, setPredictedEnergies] = useState(null);
+  const [extractHovered, setExtractHovered] = useState(false);
 
-  const isTextPacket = packet?.messageType === "text";
+  const isBasicEnergyPacket = packet?.messageType === "basic_energy_morse";
+  const isTextPacket = packet?.messageType === "text" || isBasicEnergyPacket;
   const framePreviews = packet?.previews || packet?.frames || [];
   const currentFrame = framePreviews[frameIndex];
   const currentFrameImage = currentFrame?.image || currentFrame?.preview;
@@ -35,17 +44,17 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
     setDecryptedText(null);
     setDecryptedMorse(null);
     setDecryptedSuccess(null);
+    setDecryptionMethod(null);
+    setPredictedEnergies(null);
     setOutputView("recovered");
   }, [packet?.messageId]);
 
   const previousFrame = () => {
     setFrameIndex((index) => Math.max(0, index - 1));
-    if (isTextPacket && decryptedImage) setOutputView("frames");
   };
 
   const nextFrame = () => {
     setFrameIndex((index) => Math.min(framePreviews.length - 1, index + 1));
-    if (isTextPacket && decryptedImage) setOutputView("frames");
   };
 
   const handleDecrypt = async () => {
@@ -69,7 +78,32 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
     setStatus("Decrypting signal...");
 
     try {
-      if (isTextPacket) {
+      if (isBasicEnergyPacket) {
+        const form = new FormData();
+        form.append("secret_key_image", keyFile);
+        form.append("secret_password", password);
+        form.append("message_id", packet.messageId || "");
+
+        const res = await api.post("/text/basic-energy/decrypt", form);
+        setDecryptedText(res.data.text);
+        setDecryptedMorse(res.data.morse);
+        setDecryptedSuccess(res.data.success);
+        setDecryptionMethod("normal");
+        setImageVisible(true);
+
+        if (res.data.success) {
+          setStatus(
+            "Successful DRPE decryption! Secret message recovered. The reveal fades away."
+          );
+          setRevealActive(false);
+          onSuccessfulDecrypt();
+        } else {
+          setStatus(
+            "Decryption completed with unrecognized Morse patterns. Key or password mismatch."
+          );
+          setRevealActive(true);
+        }
+      } else if (isTextPacket) {
         const form = new FormData();
         form.append("secret_key_image", keyFile);
         form.append("secret_password", password);
@@ -79,18 +113,19 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
         setDecryptedText(res.data.text);
         setDecryptedMorse(res.data.morse);
         setDecryptedSuccess(res.data.success);
-
-        if (res.data.image) {
-          setDecryptedImage(res.data.image);
-          setOutputView("recovered");
-        }
+        setDecryptionMethod("normal");
+        setImageVisible(true);
 
         if (res.data.success) {
-          setStatus("Successful decryption! Secret message recovered. The reveal fades away.");
+          setStatus(
+            "Successful decryption! Secret message recovered. The reveal fades away."
+          );
           setRevealActive(false);
           onSuccessfulDecrypt();
         } else {
-          setStatus("Decryption completed with unrecognized Morse patterns. Key or password mismatch.");
+          setStatus(
+            "Decryption completed with unrecognized Morse patterns. Key or password mismatch."
+          );
           setRevealActive(true);
         }
       } else {
@@ -101,25 +136,71 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
 
         const res = await api.post("/decrypt-with-key-images", form);
         setDecryptedImage(res.data.image);
+        setDecryptionMethod("normal");
+        setOutputView("recovered");
+        setImageVisible(true);
 
         if (res.data.match_with_cover) {
           setStatus("Successful decryption. The reveal fades away.");
           setRevealActive(false);
           onSuccessfulDecrypt();
         } else {
-          setStatus("Decryption did not match the original cover. The reveal remains active.");
+          setStatus(
+            "Decryption did not match the original cover. The reveal remains active."
+          );
           setRevealActive(true);
         }
       }
     } catch (error) {
       console.error(error);
-      setStatus(error.response?.data?.detail || error.message || "Decryption failed.");
+      setStatus(
+        error.response?.data?.detail || error.message || "Decryption failed."
+      );
       setRevealActive(true);
     } finally {
       setBusy(false);
     }
   };
 
+  const handlePredictEnergy = async () => {
+    if (!packet) {
+      setStatus("Alice has not sent a packet yet.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("Extracting Morse sequence from ciphertext...");
+
+    try {
+      const form = new FormData();
+      form.append("message_id", packet.messageId || "");
+
+      const res = await api.post("/text/basic-energy/predict", form);
+      setDecryptedText(res.data.predicted_text);
+      setDecryptedMorse(res.data.predicted_morse);
+      setDecryptedSuccess(res.data.success);
+      setDecryptionMethod("energy_prediction");
+      setPredictedEnergies(res.data.frame_energies || []);
+      setImageVisible(true);
+
+      if (res.data.success) {
+        setStatus("Success! Morse sequence extracted directly.");
+        setRevealActive(false);
+        onSuccessfulDecrypt();
+      } else {
+        setStatus("Extraction completed with unrecognized patterns.");
+        setRevealActive(true);
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus(
+        error.response?.data?.detail || error.message || "Extraction failed."
+      );
+      setRevealActive(true);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div
@@ -139,7 +220,14 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
           padding: 20,
         }}
       >
-        <div style={{ fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: "#a0ebba" }}>
+        <div
+          style={{
+            fontSize: 12,
+            letterSpacing: 2,
+            textTransform: "uppercase",
+            color: "#a0ebba",
+          }}
+        >
           Bob receiver
         </div>
 
@@ -147,7 +235,11 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
 
         <div style={{ display: "grid", gap: 14 }}>
           <div>
-            <label style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Receiver key image</label>
+            <label
+              style={{ display: "block", marginBottom: 8, fontWeight: 600 }}
+            >
+              Receiver key image
+            </label>
             <input
               type="file"
               accept="image/*"
@@ -157,7 +249,11 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
           </div>
 
           <div>
-            <label style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>Password</label>
+            <label
+              style={{ display: "block", marginBottom: 8, fontWeight: 600 }}
+            >
+              Password
+            </label>
             <input
               type="password"
               value={password}
@@ -191,14 +287,100 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
             cursor: busy ? "not-allowed" : "pointer",
             fontWeight: 700,
             fontSize: 15,
-            boxShadow: "0 0 17px rgba(186, 195, 208, 0.55), inset 0 1px 0 rgba(255,255,255,0.7)",
+            boxShadow:
+              "0 0 17px rgba(186, 195, 208, 0.55), inset 0 1px 0 rgba(255,255,255,0.7)",
             transition: "filter 0.2s ease",
           }}
         >
-          {busy ? "Decrypting..." : "Decrypt packet"}
+          {busy
+            ? "Decrypting..."
+            : isTextPacket
+            ? "Decrypt frames"
+            : "Decrypt packet"}
         </button>
 
-        <div style={{ marginTop: 18, color: "#dff9ea", minHeight: 22 }}>{status}</div>
+        {isBasicEnergyPacket && (
+          <button
+            type="button"
+            onClick={handlePredictEnergy}
+            onMouseEnter={() => setExtractHovered(true)}
+            onMouseLeave={() => setExtractHovered(false)}
+            disabled={busy}
+            style={{
+              marginTop: 12,
+              width: "100%",
+              boxSizing: "border-box",
+              border:
+                extractHovered && !busy
+                  ? "1px solid rgba(251, 191, 36, 0.45)"
+                  : "1px solid rgba(255, 255, 255, 0.12)",
+              background:
+                extractHovered && !busy
+                  ? "linear-gradient(180deg, rgba(251, 191, 36, 0.12) 0%, rgba(251, 191, 36, 0.04) 100%)"
+                  : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)",
+              padding: "12px 16px",
+              borderRadius: 12,
+              cursor: busy ? "not-allowed" : "pointer",
+              transition: "all 0.2s ease",
+              boxShadow:
+                extractHovered && !busy
+                  ? "0 4px 14px rgba(0, 0, 0, 0.35), 0 0 12px rgba(251, 191, 36, 0.12)"
+                  : "0 2px 6px rgba(0, 0, 0, 0.2)",
+              transform: extractHovered && !busy ? "translateY(-1px)" : "none",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                color: extractHovered && !busy ? "#fef3c7" : "#f1f5f9",
+                fontSize: 14,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                transition: "color 0.2s ease",
+              }}
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={extractHovered && !busy ? "#fbbf24" : "#cbd5e1"}
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ transition: "stroke 0.2s ease" }}
+              >
+                <path d="M2 12h3l3-7 4 14 3-7h3l2-4 2 4h2" />
+              </svg>
+              <span>Extract Morse from total energy</span>
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                color:
+                  extractHovered && !busy
+                    ? "rgba(254, 243, 199, 0.75)"
+                    : "rgba(148, 163, 184, 0.8)",
+                fontWeight: 400,
+                letterSpacing: 0.1,
+                transition: "color 0.2s ease",
+              }}
+            >
+              Direct extraction without receiver key
+            </span>
+          </button>
+        )}
+
+        <div style={{ marginTop: 18, color: "#dff9ea", minHeight: 22 }}>
+          {status}
+        </div>
       </div>
 
       <div
@@ -209,46 +391,27 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
           padding: 20,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: "#8ec5ff" }}>
-            Recovered output
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              color: "#8ec5ff",
+            }}
+          >
+            {isTextPacket
+              ? "Encrypted transmission"
+              : !isTextPacket && decryptedImage
+              ? "Recovered image"
+              : "Received package"}
           </div>
-          {isTextPacket && decryptedImage && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => setOutputView("recovered")}
-                style={{
-                  border: outputView === "recovered" ? "1px solid #9fe7ad" : "1px solid rgba(255,255,255,0.15)",
-                  background: outputView === "recovered" ? "rgba(159,231,173,0.2)" : "rgba(255,255,255,0.05)",
-                  color: outputView === "recovered" ? "#9fe7ad" : "#859ab1",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Recovered image
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutputView("frames")}
-                style={{
-                  border: outputView === "frames" ? "1px solid #8ec5ff" : "1px solid rgba(255,255,255,0.15)",
-                  background: outputView === "frames" ? "rgba(142,197,255,0.2)" : "rgba(255,255,255,0.05)",
-                  color: outputView === "frames" ? "#8ec5ff" : "#859ab1",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Encrypted frames
-              </button>
-            </div>
-          )}
         </div>
 
         <div
@@ -265,24 +428,39 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
             overflow: "hidden",
           }}
         >
-          {decryptedImage && (!isTextPacket || outputView === "recovered") ? (
+          {!isTextPacket && decryptedImage ? (
             <img
               src={`data:image/png;base64,${decryptedImage}`}
               alt="Decrypted image"
-              onClick={() => setLightboxImage(`data:image/png;base64,${decryptedImage}`)}
-              style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in" }}
+              onClick={() =>
+                setLightboxImage(`data:image/png;base64,${decryptedImage}`)
+              }
+              style={{
+                width: "min(100%, 500px)",
+                maxHeight: 420,
+                objectFit: "contain",
+                borderRadius: 10,
+                cursor: "zoom-in",
+              }}
             />
           ) : !packet ? (
-            <div style={{ color: "#859ab1", fontSize: 14 }}>Waiting for Alice's package.</div>
+            <div style={{ color: "#859ab1", fontSize: 14 }}>
+              Waiting for Alice's package.
+            </div>
           ) : !packageSeen ? (
-            <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
-              <strong style={{ display: "block", marginBottom: 10 }}>Got a new package!</strong>
+            <div
+              style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}
+            >
+              <strong style={{ display: "block", marginBottom: 10 }}>
+                Got a new package!
+              </strong>
               <button
                 type="button"
                 onClick={handlePackageSeen}
                 style={{
                   border: "1px solid rgba(255,255,255,0.2)",
-                  background: "linear-gradient(135deg, #edf1f5, #9da8b5, #e7ecf2)",
+                  background:
+                    "linear-gradient(135deg, #edf1f5, #9da8b5, #e7ecf2)",
                   color: "#1b2430",
                   padding: "9px 14px",
                   borderRadius: 9,
@@ -298,23 +476,46 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
               <img
                 src={`data:image/png;base64,${currentFrameImage}`}
                 alt={`Encrypted frame ${frameIndex + 1}`}
-                onClick={() => setLightboxImage(`data:image/png;base64,${currentFrameImage}`)}
-                style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in", imageRendering: "auto" }}
+                onClick={() =>
+                  setLightboxImage(`data:image/png;base64,${currentFrameImage}`)
+                }
+                style={{
+                  width: "min(100%, 500px)",
+                  maxHeight: 420,
+                  objectFit: "contain",
+                  borderRadius: 10,
+                  cursor: "zoom-in",
+                  imageRendering: "auto",
+                }}
               />
             ) : (
-              <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
-                {framePreviews.length > 0 ? "Click View frames to inspect the encrypted sequence." : "Encrypted frames are ready for Bob."}
+              <div
+                style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}
+              >
+                {framePreviews.length > 0
+                  ? "Click View frames to inspect the encrypted sequence."
+                  : "Encrypted frames are ready for Bob."}
               </div>
             )
           ) : imageVisible && packet.image ? (
             <img
               src={`data:image/png;base64,${packet.image}`}
               alt="Encrypted package"
-              onClick={() => setLightboxImage(`data:image/png;base64,${packet.image}`)}
-              style={{ width: "min(100%, 500px)", maxHeight: 420, objectFit: "contain", borderRadius: 10, cursor: "zoom-in" }}
+              onClick={() =>
+                setLightboxImage(`data:image/png;base64,${packet.image}`)
+              }
+              style={{
+                width: "min(100%, 500px)",
+                maxHeight: 420,
+                objectFit: "contain",
+                borderRadius: 10,
+                cursor: "zoom-in",
+              }}
             />
           ) : (
-            <div style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}>
+            <div
+              style={{ color: "#dceaf7", textAlign: "center", fontSize: 14 }}
+            >
               Encrypted package is visible above.
             </div>
           )}
@@ -331,8 +532,23 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
               boxShadow: "0 0 24px rgba(160, 235, 186, 0.08)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: "#a0ebba", fontWeight: 700 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  textTransform: "uppercase",
+                  color: "#a0ebba",
+                  fontWeight: 700,
+                }}
+              >
                 Decrypted Plaintext
               </div>
               <span
@@ -341,12 +557,31 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
                   fontWeight: 700,
                   padding: "4px 10px",
                   borderRadius: 999,
-                  background: decryptedSuccess ? "rgba(160, 235, 186, 0.2)" : "rgba(255, 107, 107, 0.2)",
-                  color: decryptedSuccess ? "#a0ebba" : "#ff8585",
-                  border: decryptedSuccess ? "1px solid rgba(160, 235, 186, 0.4)" : "1px solid rgba(255, 107, 107, 0.4)",
+                  background:
+                    decryptionMethod === "energy_prediction"
+                      ? "rgba(255, 209, 102, 0.2)"
+                      : decryptedSuccess
+                      ? "rgba(160, 235, 186, 0.2)"
+                      : "rgba(255, 107, 107, 0.2)",
+                  color:
+                    decryptionMethod === "energy_prediction"
+                      ? "#ffd166"
+                      : decryptedSuccess
+                      ? "#a0ebba"
+                      : "#ff8585",
+                  border:
+                    decryptionMethod === "energy_prediction"
+                      ? "1px solid rgba(255, 209, 102, 0.5)"
+                      : decryptedSuccess
+                      ? "1px solid rgba(160, 235, 186, 0.4)"
+                      : "1px solid rgba(255, 107, 107, 0.4)",
                 }}
               >
-                {decryptedSuccess ? "VALID ITU MORSE" : "CORRUPTED / UNRECOGNIZED"}
+                {decryptionMethod === "energy_prediction"
+                  ? "DIRECT EXTRACTION (NO KEY)"
+                  : decryptedSuccess
+                  ? "VALID ITU MORSE"
+                  : "CORRUPTED / UNRECOGNIZED"}
               </span>
             </div>
 
@@ -369,7 +604,16 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
             </div>
 
             <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, color: "#8ec5ff", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4, fontWeight: 600 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8ec5ff",
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                  fontWeight: 600,
+                }}
+              >
                 Extracted Morse Sequence
               </div>
               <div
@@ -400,33 +644,68 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
               background: "rgba(255,255,255,0.035)",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-              <span style={{ color: "#aebbd0", fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                marginBottom: 10,
+              }}
+            >
+              <span
+                style={{
+                  color: "#aebbd0",
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  textTransform: "uppercase",
+                }}
+              >
                 Frame navigator
               </span>
-              <output style={{ color: "#f4f8ff", fontVariantNumeric: "tabular-nums", fontSize: 14 }}>
-                {String(frameIndex + 1).padStart(2, "0")} <span style={{ color: "#748198" }}>/ {String(framePreviews.length).padStart(2, "0")}</span>
+              <output
+                style={{
+                  color: "#f4f8ff",
+                  fontVariantNumeric: "tabular-nums",
+                  fontSize: 14,
+                }}
+              >
+                {String(frameIndex + 1).padStart(2, "0")}{" "}
+                <span style={{ color: "#748198" }}>
+                  / {String(framePreviews.length).padStart(2, "0")}
+                </span>
               </output>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button type="button" onClick={previousFrame} disabled={frameIndex === 0} aria-label="Previous frame" style={frameButtonStyle}>
-              &#8592;
-            </button>
-            <input
-              type="range"
-              min="0"
-              max={framePreviews.length - 1}
-              value={frameIndex}
-              onChange={(event) => {
-                setFrameIndex(Number(event.target.value));
-                if (isTextPacket && decryptedImage) setOutputView("frames");
-              }}
-              aria-label="Encrypted frame index"
-              style={{ flex: 1, accentColor: "#e7edf5", cursor: "pointer" }}
-            />
-            <button type="button" onClick={nextFrame} disabled={frameIndex === framePreviews.length - 1} aria-label="Next frame" style={frameButtonStyle}>
-              &#8594;
-            </button>
+              <button
+                type="button"
+                onClick={previousFrame}
+                disabled={frameIndex === 0}
+                aria-label="Previous frame"
+                style={frameButtonStyle}
+              >
+                &#8592;
+              </button>
+              <input
+                type="range"
+                min="0"
+                max={framePreviews.length - 1}
+                value={frameIndex}
+                onChange={(event) => {
+                  setFrameIndex(Number(event.target.value));
+                }}
+                aria-label="Encrypted frame index"
+                style={{ flex: 1, accentColor: "#e7edf5", cursor: "pointer" }}
+              />
+              <button
+                type="button"
+                onClick={nextFrame}
+                disabled={frameIndex === framePreviews.length - 1}
+                aria-label="Next frame"
+                style={frameButtonStyle}
+              >
+                &#8594;
+              </button>
             </div>
             <input
               type="number"
@@ -436,8 +715,12 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
               onChange={(event) => {
                 const requestedFrame = Number(event.target.value);
                 if (Number.isInteger(requestedFrame)) {
-                  setFrameIndex(Math.min(framePreviews.length - 1, Math.max(0, requestedFrame - 1)));
-                  if (isTextPacket && decryptedImage) setOutputView("frames");
+                  setFrameIndex(
+                    Math.min(
+                      framePreviews.length - 1,
+                      Math.max(0, requestedFrame - 1)
+                    )
+                  );
                 }
               }}
               aria-label="Selected frame number"
@@ -457,10 +740,21 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
         )}
 
         <div style={{ marginTop: 18, color: "#dceaf7", lineHeight: 1.6 }}>
-          <div><strong>Packet received:</strong> {packet ? "yes" : "no"}</div>
-          <div><strong>Message ID:</strong> {packet?.messageId || "—"}</div>
-          <div><strong>Type:</strong> {packet?.messageType || "image"}</div>
-          <div><strong>Reveal active:</strong> {revealActive ? "yes" : "no"}</div>
+          <div>
+            <strong>Packet received:</strong> {packet ? "yes" : "no"}
+          </div>
+          <div>
+            <strong>Message ID:</strong> {packet?.messageId || "—"}
+          </div>
+          <div>
+            <strong>Type:</strong>{" "}
+            {packet?.messageType === "basic_energy_morse"
+              ? "Basic Morse"
+              : packet?.messageType || "image"}
+          </div>
+          <div>
+            <strong>Reveal active:</strong> {revealActive ? "yes" : "no"}
+          </div>
         </div>
       </div>
 
@@ -485,7 +779,12 @@ export default function BobPage({ packet, onSuccessfulDecrypt, revealActive, set
           <img
             src={lightboxImage}
             alt="Expanded encrypted package"
-            style={{ maxWidth: "min(92vw, 1100px)", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }}
+            style={{
+              maxWidth: "min(92vw, 1100px)",
+              maxHeight: "90vh",
+              objectFit: "contain",
+              borderRadius: 12,
+            }}
           />
         </div>
       )}

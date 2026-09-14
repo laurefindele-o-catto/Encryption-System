@@ -20,6 +20,7 @@ import numpy as np
 
 IMAGE_MESSAGE = "image"
 TEXT_MESSAGE = "text"
+BASIC_ENERGY_MESSAGE = "basic_energy_morse"
 
 
 @dataclass
@@ -67,7 +68,7 @@ def create_message(
     total_frames: int | None = None,
     metadata: dict | None = None,
 ) -> Message:
-    if message_type not in {IMAGE_MESSAGE, TEXT_MESSAGE}:
+    if message_type not in {IMAGE_MESSAGE, TEXT_MESSAGE, BASIC_ENERGY_MESSAGE}:
         raise ValueError(f"unsupported message_type: {message_type}")
 
     msg_id = message_id or new_message_id()
@@ -129,6 +130,6 @@ def get_messages(message_type: str | None = None) -> list[Message]:
     messages = list(_messages.values())
     if message_type is None:
         return messages
-    if message_type not in {IMAGE_MESSAGE, TEXT_MESSAGE}:
+    if message_type not in {IMAGE_MESSAGE, TEXT_MESSAGE, BASIC_ENERGY_MESSAGE}:
         raise ValueError(f"unsupported message_type: {message_type}")
     return [message for message in messages if message.message_type == message_type]
