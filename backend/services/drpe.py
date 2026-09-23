@@ -96,11 +96,15 @@ def drpe_encrypt(
     }
 
     if include_stages:
+        g_shift = np.fft.fftshift(g, axes=(0, 1))
+        gp_shift = np.fft.fftshift(g_prime, axes=(0, 1))
+        g_mag = _magnitude_preview(g_shift)
+
         result["stages"] = {
             "original": cover_image,
-            "spatial_rotation": np.abs(cover_spatial),
-            "frequency_spectrum": _magnitude_preview(g),
-            "frequency_rotation": _magnitude_preview(g_prime),
+            "spatial_rotation": _interferometric_preview(cover_spatial),
+            "frequency_spectrum": _interferometric_preview(g_shift, base_mag=g_mag),
+            "frequency_rotation": _interferometric_preview(gp_shift, base_mag=g_mag),
             "ciphertext": np.abs(c),
         }
 
@@ -150,14 +154,30 @@ def drpe_decrypt_with_stages(
     cover = cover_spatial * np.exp(-1j * p1)
     recovered = np.clip(np.round(cover.real), 0, 255)
 
+    gp_shift = np.fft.fftshift(g_prime, axes=(0, 1))
+    g_shift = np.fft.fftshift(g, axes=(0, 1))
+    gb_mag = _magnitude_preview(gp_shift)
+
     stages = {
         "ciphertext": np.abs(ciphertext_complex),
-        "frequency_spectrum": _magnitude_preview(g_prime),
-        "frequency_phase_removed": _magnitude_preview(g),
-        "spatial_phase_removed": np.abs(cover_spatial),
+        "frequency_spectrum": _interferometric_preview(gp_shift, base_mag=gb_mag),
+        "frequency_phase_removed": _interferometric_preview(g_shift, base_mag=gb_mag),
+        "spatial_phase_removed": _interferometric_preview(cover_spatial),
         "recovered": recovered,
     }
     return recovered, stages
+
+
+def _interferometric_preview(
+    field: np.ndarray,
+    base_mag: np.ndarray | None = None,
+    alpha: float = 0.32,
+) -> np.ndarray:
+    """Generate interference preview by modulating magnitude with optical phase."""
+    mag = base_mag if base_mag is not None else np.abs(field)
+    phi = np.angle(field) if np.iscomplexobj(field) else np.zeros_like(field, dtype=np.float64)
+    factor = (1.0 - alpha) + alpha * ((1.0 + np.cos(phi)) / 2.0)
+    return np.clip(mag * factor, 0.0, 255.0)
 
 
 def _magnitude_preview(values: np.ndarray) -> np.ndarray:

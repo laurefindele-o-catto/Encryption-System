@@ -126,6 +126,15 @@ def test_end_to_end_service_encryption_and_prediction():
     assert pred_res["predicted_morse"] == enc_res["morse"]
     assert pred_res["predicted_symbols"] == enc_res["symbols"]
     assert pred_res["success"] is True
+    assert len(pred_res["frames"]) == len(enc_res["symbols"])
+    for f in pred_res["frames"]:
+        assert "total_energy" in f
+        assert "energy" in f
+        assert f["total_energy"] == f["energy"]
+        assert f["symbol"] == f["predicted_symbol"]
+        assert f["expected_energy"] is not None
+        assert f["energy_deviation"] is not None
+        assert f["decision_threshold"] is not None
 
     # 3. Normal Decryption with correct credentials
     dec_res = decrypt_basic_morse_normal(
@@ -139,6 +148,12 @@ def test_end_to_end_service_encryption_and_prediction():
     assert dec_res["symbols"] == enc_res["symbols"]
     assert dec_res["image"] is not None
 
+    # Verify frame diagnostics report block-level brightness delta (~k * 20.0)
+    assert len(dec_res["frames"]) == len(enc_res["symbols"])
+    for f in dec_res["frames"]:
+        expected_delta = f["symbol"] * 20.0
+        assert np.isclose(f["brightness_delta"], expected_delta, atol=1.0)
+
     # 4. Normal Decryption with wrong password fails to recover text
     dec_wrong_pw = decrypt_basic_morse_normal(
         message_id=msg_id,
@@ -146,6 +161,30 @@ def test_end_to_end_service_encryption_and_prediction():
         secret_password="wrong-password",
     )
     assert dec_wrong_pw["text"] != secret_text
+
+
+def test_block_spatial_isolation():
+    """Verify that only the designated block is modified and outside pixels remain untouched."""
+    base_image = np.full((64, 64, 3), 100.0, dtype=np.float64)
+    block_coords = (12, 14)
+    block_size = 16
+    offset_step = 25.0
+
+    symbol_frame = generate_basic_symbol_image(
+        symbol=2,
+        base_image=base_image,
+        offset_step=offset_step,
+        block_coords=block_coords,
+        block_size=block_size,
+    )
+    r, c = block_coords
+    # Check inside block: offset of 2 * 25.0 = 50.0 added
+    assert np.allclose(symbol_frame[r:r + block_size, c:c + block_size], 100.0 + 2 * offset_step)
+
+    # Check outside block: remains unchanged
+    mask = np.ones((64, 64), dtype=bool)
+    mask[r:r + block_size, c:c + block_size] = False
+    assert np.allclose(symbol_frame[mask], 100.0)
 
 
 def test_api_basic_energy_endpoints_flow():
@@ -188,6 +227,12 @@ def test_api_basic_energy_endpoints_flow():
     assert pred_data["bypassed_decryption"] is True
     assert pred_data["predicted_text"] == "HELLO WORLD"
     assert pred_data["success"] is True
+    assert len(pred_data["frames"]) == pred_data["frame_count"]
+    for f in pred_data["frames"]:
+        assert f["total_energy"] is not None
+        assert f["symbol"] is not None
+        assert f["expected_energy"] is not None
+        assert f["decision_threshold"] is not None
 
     # 3. Normal Decrypt via API
     key_buf.seek(0)
@@ -205,3 +250,7 @@ def test_api_basic_energy_endpoints_flow():
     dec_data = dec_response.json()
     assert dec_data["text"] == "HELLO WORLD"
     assert dec_data["success"] is True
+    assert len(dec_data["frames"]) > 0
+    for frame_info in dec_data["frames"]:
+        expected_delta = frame_info["symbol"] * 20.0
+        assert abs(frame_info["brightness_delta"] - expected_delta) < 1.0

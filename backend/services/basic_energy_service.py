@@ -9,15 +9,19 @@ from __future__ import annotations
 import secrets
 import numpy as np
 
+from config import BASIC_BLOCK_COORDS, BASIC_BLOCK_SIZE
 from services.drpe import drpe_decrypt, drpe_encrypt, energy, generate_phase_masks
 from services.encoding.basic_energy_morse import (
+    ENERGY_OFFSET_STEP,
     SYMBOL_NAMES,
+    _get_block_slice,
     compute_expected_energy_levels,
     decode_symbols_to_morse_and_text,
     encode_text_to_symbols,
     extract_symbol_from_decrypted_image,
     generate_basic_symbol_image,
     predict_symbol_from_energy,
+    prepare_base_image_for_offset,
 )
 from services.image_utils import (
     array_to_base64,
@@ -45,6 +49,9 @@ def encrypt_basic_morse_message(
     message_id: str | None = None,
     salt: bytes | None = None,
     include_previews: bool = False,
+    block_coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    block_size: int = BASIC_BLOCK_SIZE,
+    offset_step: float = ENERGY_OFFSET_STEP,
 ) -> dict:
     """Encrypt secret text as basic Morse frames without differential cancellation."""
     if not isinstance(secret_text, str) or not secret_text.strip():
@@ -62,7 +69,12 @@ def encrypt_basic_morse_message(
     if not symbols:
         raise ValueError("secret_text produced no encodable symbols")
 
-    energy_levels, thresholds = compute_expected_energy_levels(normalized_base)
+    energy_levels, thresholds = compute_expected_energy_levels(
+        normalized_base,
+        offset_step=offset_step,
+        block_coords=block_coords,
+        block_size=block_size,
+    )
 
     generated_message_id = message_id or new_message_id()
     generated_salt = salt or secrets.token_bytes(16)
@@ -84,13 +96,22 @@ def encrypt_basic_morse_message(
             "symbols": [int(s) for s in symbols],
             "thresholds": thresholds,
             "energy_levels": energy_levels,
+            "block_coords": list(block_coords),
+            "block_size": block_size,
+            "offset_step": offset_step,
         },
     )
 
     previews = []
 
     for frame_index, symbol in enumerate(symbols):
-        symbol_image = generate_basic_symbol_image(symbol, normalized_base)
+        symbol_image = generate_basic_symbol_image(
+            symbol,
+            normalized_base,
+            offset_step=offset_step,
+            block_coords=block_coords,
+            block_size=block_size,
+        )
 
         p1_material = derive_frame_key(master_key, generated_message_id, frame_index, b"DRPE/P1")
         p2_material = derive_frame_key(master_key, generated_message_id, frame_index, b"DRPE/P2")
@@ -163,6 +184,18 @@ def decrypt_basic_morse_normal(
     password_key = derive_password_key(secret_password, message.salt)
     master_key = derive_master_key(password_key, image_digest)
 
+    block_coords = tuple(message.metadata.get("block_coords", BASIC_BLOCK_COORDS))
+    block_size = int(message.metadata.get("block_size", BASIC_BLOCK_SIZE))
+    offset_step = float(message.metadata.get("offset_step", ENERGY_OFFSET_STEP))
+
+    clamped_base = prepare_base_image_for_offset(
+        message.base_image,
+        offset_step=offset_step,
+        block_coords=block_coords,
+        block_size=block_size,
+    )
+    rows, cols = _get_block_slice(block_coords, block_size)
+
     recovered_symbols: list[int] = []
     frame_diagnostics: list[dict] = []
     first_recovered_image = None
@@ -180,17 +213,24 @@ def decrypt_basic_morse_normal(
             first_recovered_image = recovered_image
 
         symbol = extract_symbol_from_decrypted_image(
-            recovered_image, message.base_image
+            recovered_image,
+            message.base_image,
+            offset_step=offset_step,
+            block_coords=block_coords,
+            block_size=block_size,
         )
 
         recovered_symbols.append(int(symbol))
+
+        block_recovered = recovered_image[rows, cols]
+        block_base = clamped_base[rows, cols]
 
         frame_diagnostics.append({
             "frame_index": frame_idx,
             "symbol": int(symbol),
             "symbol_name": SYMBOL_NAMES.get(symbol, str(symbol)),
-            "mean_brightness": float(recovered_image.mean()),
-            "brightness_delta": float(recovered_image.mean() - message.base_image.mean()),
+            "mean_brightness": float(block_recovered.mean()),
+            "brightness_delta": float(block_recovered.mean() - block_base.mean()),
             "total_energy": energy(recovered_image),
         })
 
@@ -232,9 +272,22 @@ def predict_basic_morse_from_energy(message_id: str) -> dict:
     if not ordered_frames:
         raise ValueError("No frames found for this message")
 
+    energy_levels = message.metadata.get("energy_levels")
     thresholds = message.metadata.get("thresholds")
-    if not thresholds:
-        _, thresholds = compute_expected_energy_levels(message.base_image)
+    if not thresholds or not energy_levels:
+        block_coords = tuple(message.metadata.get("block_coords", BASIC_BLOCK_COORDS))
+        block_size = int(message.metadata.get("block_size", BASIC_BLOCK_SIZE))
+        offset_step = float(message.metadata.get("offset_step", ENERGY_OFFSET_STEP))
+        computed_levels, computed_thresholds = compute_expected_energy_levels(
+            message.base_image,
+            offset_step=offset_step,
+            block_coords=block_coords,
+            block_size=block_size,
+        )
+        if not energy_levels:
+            energy_levels = computed_levels
+        if not thresholds:
+            thresholds = computed_thresholds
 
     predicted_symbols: list[int] = []
     frame_energies: list[float] = []
@@ -248,11 +301,31 @@ def predict_basic_morse_from_energy(message_id: str) -> dict:
         pred_symbol = predict_symbol_from_energy(c_energy, thresholds)
         predicted_symbols.append(pred_symbol)
 
+        expected_e = float(energy_levels[pred_symbol]) if energy_levels and pred_symbol < len(energy_levels) else None
+        deviation = float(abs(c_energy - expected_e)) if expected_e is not None else None
+
+        if len(thresholds) >= 3:
+            if pred_symbol == 0:
+                boundary_desc = f"< {thresholds[0]:.2f}"
+            elif pred_symbol == 1:
+                boundary_desc = f"{thresholds[0]:.2f} - {thresholds[1]:.2f}"
+            elif pred_symbol == 2:
+                boundary_desc = f"{thresholds[1]:.2f} - {thresholds[2]:.2f}"
+            else:
+                boundary_desc = f"> {thresholds[2]:.2f}"
+        else:
+            boundary_desc = None
+
         frame_details.append({
             "frame_index": frame.frame_index,
             "energy": c_energy,
+            "total_energy": c_energy,
             "predicted_symbol": pred_symbol,
+            "symbol": pred_symbol,
             "symbol_name": SYMBOL_NAMES.get(pred_symbol, str(pred_symbol)),
+            "expected_energy": expected_e,
+            "energy_deviation": deviation,
+            "decision_threshold": boundary_desc,
         })
 
     morse, text, success = decode_symbols_to_morse_and_text(predicted_symbols)

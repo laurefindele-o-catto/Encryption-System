@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from config import BASIC_BLOCK_COORDS, BASIC_BLOCK_SIZE
 from services.encoding.morse_to_symbol_sequence import (
     SymbolState,
     morse_to_symbol_sequence,
@@ -37,6 +38,18 @@ SYMBOL_NAMES = {
 }
 
 
+def _get_block_slice(
+    coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    size: int = BASIC_BLOCK_SIZE,
+) -> tuple[slice, slice]:
+    """Return 2D slice tuple for the specified block coordinates and size."""
+    row, col = coords
+    return slice(row, row + size), slice(col, col + size)
+
+
+get_block_slice = _get_block_slice
+
+
 def encode_text_to_symbols(text: str) -> tuple[str, list[SymbolState]]:
     """Convert plaintext into standard ITU Morse code and symbol states."""
     morse = text_to_morse(text)
@@ -47,46 +60,59 @@ def encode_text_to_symbols(text: str) -> tuple[str, list[SymbolState]]:
 def prepare_base_image_for_offset(
     base_image: np.ndarray,
     offset_step: float = ENERGY_OFFSET_STEP,
+    block_coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    block_size: int = BASIC_BLOCK_SIZE,
 ) -> np.ndarray:
-    """Safely clamp the base image so adding up to 3*offset_step does not clip at 255."""
+    """Safely clamp the base image block so adding up to 3*offset_step does not clip at 255."""
     max_headroom = 3.0 * offset_step
-    return np.clip(np.asarray(base_image, dtype=np.float64), 0.0, 255.0 - max_headroom)
+    clamped = np.asarray(base_image, dtype=np.float64).copy()
+    rows, cols = _get_block_slice(block_coords, block_size)
+    clamped[rows, cols] = np.clip(clamped[rows, cols], 0.0, 255.0 - max_headroom)
+    return clamped
 
 
 def generate_basic_symbol_image(
     symbol: int | SymbolState,
     base_image: np.ndarray,
     offset_step: float = ENERGY_OFFSET_STEP,
+    block_coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    block_size: int = BASIC_BLOCK_SIZE,
 ) -> np.ndarray:
     """
-    Modulate base image with an uncancelled global intensity offset.
-    State 0 (DOT)        -> offset 0
-    State 1 (DASH)       -> offset +1 * offset_step
-    State 2 (LETTER_GAP) -> offset +2 * offset_step
-    State 3 (WORD_GAP)   -> offset +3 * offset_step
+    Modulate base image with an uncancelled intensity offset applied exclusively
+    to a designated block region (defaulting to Block A).
+    The offset is scaled by the symbol state value (k = 0, 1, 2, 3):
+    State 0 (DOT)        -> offset 0 * offset_step
+    State 1 (DASH)       -> offset 1 * offset_step
+    State 2 (LETTER_GAP) -> offset 2 * offset_step
+    State 3 (WORD_GAP)   -> offset 3 * offset_step
     """
-    clamped_base = prepare_base_image_for_offset(base_image, offset_step)
+    clamped_base = prepare_base_image_for_offset(base_image, offset_step, block_coords, block_size)
+    frame = clamped_base.copy()
+    rows, cols = _get_block_slice(block_coords, block_size)
     offset = float(symbol) * offset_step
-    return np.clip(clamped_base + offset, 0.0, 255.0)
+    frame[rows, cols] = np.clip(clamped_base[rows, cols] + offset, 0.0, 255.0)
+    return frame
 
 
 def compute_expected_energy_levels(
     base_image: np.ndarray,
     offset_step: float = ENERGY_OFFSET_STEP,
+    block_coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    block_size: int = BASIC_BLOCK_SIZE,
 ) -> tuple[list[float], list[float]]:
     """
-    Compute the theoretical total energy for each symbol state (0..3)
-    and the mid-point decision thresholds between consecutive levels.
+    Compute theoretical total energy for each symbol state (0..3) when
+    offset is applied to the designated block region, along with decision thresholds.
 
     Returns:
         (energies, thresholds):
             energies: [E_dot, E_dash, E_letter_gap, E_word_gap]
             thresholds: 3 decision boundaries separating the 4 energy levels
     """
-    clamped_base = prepare_base_image_for_offset(base_image, offset_step)
     energies = []
     for s in [SymbolState.DOT, SymbolState.DASH, SymbolState.LETTER_GAP, SymbolState.WORD_GAP]:
-        frame = clamped_base + float(s) * offset_step
+        frame = generate_basic_symbol_image(s, base_image, offset_step, block_coords, block_size)
         energies.append(float(np.sum(frame ** 2)))
 
     thresholds = [
@@ -117,13 +143,17 @@ def extract_symbol_from_decrypted_image(
     decrypted_image: np.ndarray,
     base_image: np.ndarray,
     offset_step: float = ENERGY_OFFSET_STEP,
+    block_coords: tuple[int, int] = BASIC_BLOCK_COORDS,
+    block_size: int = BASIC_BLOCK_SIZE,
 ) -> SymbolState:
     """
     Extract symbol state from a DRPE-decrypted image.
-    Calculates brightness difference from baseline and quantizes to nearest SymbolState.
+    Calculates brightness difference from baseline in the designated block
+    and quantizes back to nearest SymbolState (k = 0, 1, 2, 3).
     """
-    clamped_base = prepare_base_image_for_offset(base_image, offset_step)
-    diff = float(decrypted_image.mean() - clamped_base.mean())
+    clamped_base = prepare_base_image_for_offset(base_image, offset_step, block_coords, block_size)
+    rows, cols = _get_block_slice(block_coords, block_size)
+    diff = float(decrypted_image[rows, cols].mean() - clamped_base[rows, cols].mean())
     estimated_k = diff / offset_step
     symbol_int = int(np.clip(np.round(estimated_k), 0, 3))
     return SymbolState(symbol_int)
