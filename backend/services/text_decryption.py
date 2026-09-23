@@ -7,7 +7,7 @@ import numpy as np
 from services.drpe import drpe_decrypt, generate_phase_masks
 from services.encoding.morse_to_symbol_sequence import SymbolState, symbol_sequence_to_morse
 from services.encoding.morse_to_text import is_valid_morse, morse_to_text
-from services.encoding.symbol_image import read_differential_brightness
+from services.encoding.symbol_image import differential_brightness_metrics, read_differential_brightness
 from services.image_utils import (
     array_to_base64,
     canonicalize_key_image,
@@ -90,6 +90,7 @@ def decrypt_text_message(
             "frame_index": frame_idx,
             "symbol": int(symbol),
             "symbol_name": SYMBOL_NAMES.get(symbol, str(symbol)),
+            **differential_brightness_metrics(recovered_image),
         })
 
     morse = symbol_sequence_to_morse(recovered_symbols)

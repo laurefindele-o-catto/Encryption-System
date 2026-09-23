@@ -42,6 +42,7 @@ async def encrypt_controller(
         cover_energy=result["cover_energy"],
         message_id=result["message_id"],
         salt_b64=base64.b64encode(result["salt"]).decode("ascii"),
+        stages=result["stages"],
     )
 
 
@@ -72,4 +73,5 @@ async def decrypt_controller(
         image=result["image"],
         energy=result["energy"],
         match_with_cover=result["match_with_cover"],
+        stages=result["stages"],
     )

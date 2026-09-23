@@ -17,6 +17,12 @@ export default function AlicePage({
   const [secretText, setSecretText] = useState("");
   const [frameIndex, setFrameIndex] = useState(0);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [showEncryptionStages, setShowEncryptionStages] = useState(false);
+  const [encryptionStageIndex, setEncryptionStageIndex] = useState(0);
+  const [showTextDiagnostics, setShowTextDiagnostics] = useState(false);
+  const [privateMorse, setPrivateMorse] = useState("");
+  const [privateSymbols, setPrivateSymbols] = useState([]);
+  const [privateEnergyLevels, setPrivateEnergyLevels] = useState([]);
 
   const isTextPacket =
     packet?.messageType === "text" ||
@@ -61,8 +67,11 @@ export default function AlicePage({
         messageType: "image",
         messageId: res.data.message_id,
         image: res.data.image,
+        stages: res.data.stages || [],
       };
 
+      setEncryptionStageIndex(0);
+      setShowEncryptionStages(false);
       onPacketReady(payload);
       setStatus("Signal encrypted and ready for Bob to receive.");
     } catch (error) {
@@ -100,6 +109,9 @@ export default function AlicePage({
     setBusy(true);
     setStatus("Converting text and encrypting frames...");
     setRevealActive(true);
+    const morse = textToMorseLocal(secretText);
+    setPrivateMorse(morse);
+    setPrivateSymbols(symbolsFromMorse(morse));
 
     try {
       const form = new FormData();
@@ -114,8 +126,6 @@ export default function AlicePage({
         messageId: res.data.message_id,
         saltB64: res.data.salt_b64,
         frameCount: res.data.frame_count,
-        morse: res.data.morse,
-        symbols: res.data.symbols,
         baseImageShape: res.data.base_image_shape,
         previews: res.data.previews || [],
         image: res.data.previews?.[0]?.image || null,
@@ -161,6 +171,9 @@ export default function AlicePage({
     setBusy(true);
     setStatus("Converting text and encrypting Basic Morse frames...");
     setRevealActive(true);
+    const morse = textToMorseLocal(secretText);
+    setPrivateMorse(morse);
+    setPrivateSymbols(symbolsFromMorse(morse));
 
     try {
       const form = new FormData();
@@ -175,8 +188,6 @@ export default function AlicePage({
         messageId: res.data.message_id,
         saltB64: res.data.salt_b64,
         frameCount: res.data.frame_count,
-        morse: res.data.morse,
-        symbols: res.data.symbols,
         thresholds: res.data.thresholds || [],
         energyLevels: res.data.energy_levels || [],
         baseImageShape: res.data.base_image_shape,
@@ -185,6 +196,7 @@ export default function AlicePage({
       };
 
       setFrameIndex(0);
+      setPrivateEnergyLevels(res.data.energy_levels || []);
       onPacketReady(energyPacket);
       setStatus("Basic Morse encrypted and ready for transmission.");
     } catch (error) {
@@ -451,6 +463,25 @@ export default function AlicePage({
         <div style={{ marginTop: 18, color: "#cfe3ff", minHeight: 22 }}>
           {status}
         </div>
+
+        {mode === "image" && packet?.messageType === "image" && packet.stages?.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowEncryptionStages((visible) => !visible)}
+            style={processToggleStyle}
+          >
+            {showEncryptionStages ? "Hide Under the hood" : "Under the hood"}
+          </button>
+        )}
+
+        {showEncryptionStages && packet?.stages?.length > 0 && (
+          <ProcessStageViewer
+            stages={packet.stages}
+            index={encryptionStageIndex}
+            onChange={setEncryptionStageIndex}
+          />
+        )}
+
       </div>
 
       <div
@@ -570,6 +601,50 @@ export default function AlicePage({
           </div>
         )}
 
+        {(mode === "text" || mode === "basic-energy") && privateMorse && (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowTextDiagnostics((visible) => !visible)}
+              style={processToggleStyle}
+            >
+              {showTextDiagnostics ? "Hide behind the scenes" : "Behind the scenes"}
+            </button>
+            {showTextDiagnostics && (
+              <div style={processViewerStyle}>
+                {(() => {
+                  const stateIndex = privateSymbols[frameIndex] === "DOT" ? 0 : privateSymbols[frameIndex] === "DASH" ? 1 : privateSymbols[frameIndex] === "LETTER_GAP" ? 2 : 3;
+                  const firstDifference = [16, 16, -16, -16][stateIndex];
+                  const secondDifference = [16, -16, 16, -16][stateIndex];
+                  return (
+                    <>
+                      <div style={processHeaderStyle}>
+                        <span style={processKickerStyle}>Private sender diagnostics</span>
+                        <span style={processCounterStyle}>{frameIndex + 1} / {privateSymbols.length}</span>
+                      </div>
+                      <div style={diagnosticLabelStyle}>Whole Morse sequence</div>
+                      <MorseSequenceHighlight morse={privateMorse} activeIndex={frameIndex} />
+                      <div style={{ marginTop: 12, color: "#f4f8ff", fontWeight: 700 }}>
+                        Current state: {privateSymbols[frameIndex] || "pending"}
+                      </div>
+                      <div style={{ marginTop: 8, color: "#dceaf7", fontFamily: "monospace", fontSize: 12 }}>
+                        {mode === "text"
+                          ? `A-B energy difference: ${firstDifference > 0 ? "+" : ""}${firstDifference} | C-D energy difference: ${secondDifference > 0 ? "+" : ""}${secondDifference}`
+                          : `Expected total Parseval energy: ${privateEnergyLevels[stateIndex]?.toFixed?.(2) || "pending"}`}
+                      </div>
+                      <div style={{ marginTop: 8, color: "#aebbd0", fontSize: 12 }}>
+                        {mode === "text"
+                          ? "Differential encoding applies equal and opposite changes to the block pairs, preserving the intended net energy balance."
+                          : "Basic Morse changes the whole-image brightness level, producing a distinct Parseval energy level."}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </>
+        )}
+
         <div style={{ marginTop: 18, color: "#dceaf7", lineHeight: 1.6 }}>
           <div>
             <strong>Message ID:</strong> {packet?.messageId || "—"}
@@ -632,3 +707,156 @@ export default function AlicePage({
     </div>
   );
 }
+
+function MorseSequenceHighlight({ morse, activeIndex }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 2,
+        marginTop: 4,
+        padding: "9px 10px",
+        borderRadius: 8,
+        background: "rgba(0,0,0,0.28)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        fontFamily: "monospace",
+        fontSize: 17,
+        lineHeight: 1.5,
+        whiteSpace: "pre-wrap",
+      }}
+      aria-label={`Morse sequence, active symbol ${activeIndex + 1}`}
+    >
+      {[...morse].map((character, index) => (
+        <span
+          key={`${character}-${index}`}
+          style={{
+            minWidth: character === " " ? 11 : "auto",
+            padding: character === " " ? "0 2px" : "1px 4px",
+            borderRadius: 5,
+            color: index === activeIndex ? "#111923" : "#f4f8ff",
+            background: index === activeIndex
+              ? "linear-gradient(135deg, #ffffff 0%, #eaf2ff 55%, #cbd9ed 100%)"
+              : "transparent",
+            boxShadow: index === activeIndex
+              ? "0 0 8px rgba(255,255,255,0.95), 0 0 18px rgba(202,220,255,0.7)"
+              : "none",
+            transform: index === activeIndex ? "translateY(-1px)" : "none",
+            transition: "all 0.2s ease",
+          }}
+        >
+          {character === " " ? "·" : character}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const ITU_MORSE = {
+  A: ".-", B: "-...", C: "-.-.", D: "-..", E: ".", F: "..-.", G: "--.", H: "....",
+  I: "..", J: ".---", K: "-.-", L: ".-..", M: "--", N: "-.", O: "---", P: ".--.",
+  Q: "--.-", R: ".-.", S: "...", T: "-", U: "..-", V: "...-", W: ".--", X: "-..-",
+  Y: "-.--", Z: "--..", "0": "-----", "1": ".----", "2": "..---", "3": "...--",
+  "4": "....-", "5": ".....", "6": "-....", "7": "--...", "8": "---..", "9": "----.",
+  ".": ".-.-.-", ",": "--..--", "?": "..--..",
+};
+
+function textToMorseLocal(text) {
+  return text.trim().toUpperCase().split(/\s+/).map((word) => (
+    [...word].map((character) => ITU_MORSE[character] || "").filter(Boolean).join(" ")
+  )).join("/");
+}
+
+function symbolsFromMorse(morse) {
+  return [...morse].map((character) => ({ ".": "DOT", "-": "DASH", " ": "LETTER_GAP", "/": "WORD_GAP" }[character]));
+}
+
+const diagnosticLabelStyle = { color: "#8ec5ff", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" };
+const diagnosticValueStyle = { color: "#f4f8ff", fontFamily: "monospace", wordBreak: "break-all", marginTop: 4 };
+
+function ProcessStageViewer({ stages, index, onChange }) {
+  const stage = stages[index];
+  if (!stage) return null;
+
+  return (
+    <div style={processViewerStyle}>
+      <div style={processHeaderStyle}>
+        <span style={processKickerStyle}>Encryption sequence</span>
+        <span style={processCounterStyle}>{index + 1} / {stages.length}</span>
+      </div>
+      <div style={{ color: "#f4f8ff", fontWeight: 700, marginBottom: 10 }}>{formatStageName(stage.name)}</div>
+      <img
+        src={`data:image/png;base64,${stage.image}`}
+        alt={formatStageName(stage.name)}
+        style={{ width: "100%", maxHeight: 240, objectFit: "contain", borderRadius: 10, background: "rgba(0,0,0,0.35)" }}
+      />
+      <input
+        type="range"
+        min="0"
+        max={stages.length - 1}
+        value={index}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label="Encryption stage"
+        style={{ width: "100%", marginTop: 12, accentColor: "#e7edf5" }}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
+        <button type="button" onClick={() => onChange(Math.max(0, index - 1))} disabled={index === 0} style={processButtonStyle}>Previous</button>
+        <button type="button" onClick={() => onChange(Math.min(stages.length - 1, index + 1))} disabled={index === stages.length - 1} style={processButtonStyle}>Next</button>
+      </div>
+    </div>
+  );
+}
+
+function formatStageName(name) {
+  return name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+const processToggleStyle = {
+  width: "100%",
+  marginTop: 12,
+  padding: "10px 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(255,255,255,0.06)",
+  color: "#e7edf5",
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+const processViewerStyle = {
+  marginTop: 12,
+  padding: 14,
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.035)",
+};
+
+const processHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 10,
+};
+
+const processKickerStyle = {
+  color: "#aebbd0",
+  fontSize: 11,
+  letterSpacing: 1.4,
+  textTransform: "uppercase",
+};
+
+const processCounterStyle = {
+  color: "#f4f8ff",
+  fontSize: 13,
+  fontVariantNumeric: "tabular-nums",
+};
+
+const processButtonStyle = {
+  border: "1px solid rgba(255,255,255,0.16)",
+  borderRadius: 8,
+  background: "rgba(255,255,255,0.07)",
+  color: "#f4f8ff",
+  padding: "7px 12px",
+  cursor: "pointer",
+};

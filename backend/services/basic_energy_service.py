@@ -113,8 +113,6 @@ def encrypt_basic_morse_message(
                 "frame_index": frame_index,
                 "image": array_to_base64_preview(encrypted["amplitude"]),
                 "energy": frame_energy,
-                "symbol": int(symbol),
-                "symbol_name": SYMBOL_NAMES.get(symbol, str(symbol)),
             })
 
     return {
@@ -191,6 +189,9 @@ def decrypt_basic_morse_normal(
             "frame_index": frame_idx,
             "symbol": int(symbol),
             "symbol_name": SYMBOL_NAMES.get(symbol, str(symbol)),
+            "mean_brightness": float(recovered_image.mean()),
+            "brightness_delta": float(recovered_image.mean() - message.base_image.mean()),
+            "total_energy": energy(recovered_image),
         })
 
     morse, text, success = decode_symbols_to_morse_and_text(recovered_symbols)

@@ -10,6 +10,12 @@ class ImageResponse(BaseModel):
     image: str  # base64-encoded PNG
 
 
+class ProcessStage(BaseModel):
+    """One display-only image in an encryption/decryption walkthrough."""
+    name: str
+    image: str
+
+
 class EncryptResponse(BaseModel):
     """Returned by POST /api/encrypt."""
     image: str          # base64-encoded PNG of |ciphertext| (display image)
@@ -17,6 +23,7 @@ class EncryptResponse(BaseModel):
     cover_energy: float  # Σ(pixel²) over the original cover (for Parseval readout)
     message_id: str
     salt_b64: str
+    stages: list[ProcessStage] = []
 
 
 class DecryptResponse(BaseModel):
@@ -24,6 +31,7 @@ class DecryptResponse(BaseModel):
     image: str          # base64-encoded PNG of the recovered cover
     energy: float       # Σ(pixel²) over the recovered image
     match_with_cover: bool  # True iff the server still has the original and they match
+    stages: list[ProcessStage] = []
 
 
 class TextFramePreview(BaseModel):
@@ -37,8 +45,6 @@ class TextEncryptResponse(BaseModel):
     """Returned by POST /api/text/encrypt."""
     message_id: str
     salt_b64: str
-    morse: str
-    symbols: list[int]
     frame_count: int
     base_image_shape: list[int]
     previews: list[TextFramePreview] = []
@@ -49,6 +55,8 @@ class TextDecryptedFrame(BaseModel):
     frame_index: int
     symbol: int
     symbol_name: str
+    block_a_minus_b: float | None = None
+    block_c_minus_d: float | None = None
 
 
 class TextDecryptResponse(BaseModel):
@@ -68,16 +76,12 @@ class BasicEnergyFramePreview(BaseModel):
     frame_index: int
     image: str
     energy: float
-    symbol: int
-    symbol_name: str
 
 
 class BasicEnergyEncryptResponse(BaseModel):
     """Returned by POST /api/text/basic-energy/encrypt."""
     message_id: str
     salt_b64: str
-    morse: str
-    symbols: list[int]
     frame_count: int
     base_image_shape: list[int]
     thresholds: list[float] = []
@@ -90,6 +94,9 @@ class BasicEnergyDecryptedFrame(BaseModel):
     frame_index: int
     symbol: int
     symbol_name: str
+    mean_brightness: float | None = None
+    brightness_delta: float | None = None
+    total_energy: float | None = None
 
 
 class BasicEnergyDecryptResponse(BaseModel):
