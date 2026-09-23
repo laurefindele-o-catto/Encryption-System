@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from services.drpe import drpe_decrypt, energy, generate_phase_masks
+from services.drpe import drpe_decrypt, drpe_decrypt_with_stages, energy, generate_phase_masks
 from services.image_utils import (
     array_to_base64,
+    array_to_base64_preview,
     canonicalize_key_image,
     hash_canonical_key_image,
 )
@@ -63,7 +64,7 @@ def decrypt_image_message(
     c_shape = frame.ciphertext_complex.shape
     p1, p2 = generate_phase_masks(c_shape, p1_material, p2_material)
 
-    recovered = drpe_decrypt(
+    recovered, stages = drpe_decrypt_with_stages(
         ciphertext_complex=frame.ciphertext_complex,
         p1=p1,
         p2=p2,
@@ -78,4 +79,8 @@ def decrypt_image_message(
         "image": array_to_base64(recovered),
         "energy": energy(recovered),
         "match_with_cover": match,
+        "stages": [
+            {"name": name, "image": array_to_base64_preview(image, max_size=512)}
+            for name, image in stages.items()
+        ],
     }

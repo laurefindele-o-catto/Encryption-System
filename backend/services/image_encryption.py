@@ -10,6 +10,7 @@ import numpy as np
 from services.drpe import drpe_encrypt, energy
 from services.image_utils import (
     array_to_base64,
+    array_to_base64_preview,
     canonicalize_key_image,
     hash_canonical_key_image,
 )
@@ -63,7 +64,12 @@ def encrypt_image_message(
         frame_index=0,
     )
 
-    out = drpe_encrypt(normalized_cover, p1_material, p2_material)
+    out = drpe_encrypt(
+        normalized_cover,
+        p1_material,
+        p2_material,
+        include_stages=True,
+    )
 
     message = create_message(
         secret_key_image=secret_key_image,
@@ -91,4 +97,8 @@ def encrypt_image_message(
         "image": array_to_base64(out["amplitude"]),
         "energy": energy(out["amplitude"]),
         "cover_energy": energy(normalized_cover),
+        "stages": [
+            {"name": name, "image": array_to_base64_preview(image, max_size=512)}
+            for name, image in out["stages"].items()
+        ],
     }

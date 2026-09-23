@@ -54,8 +54,6 @@ async def encrypt_text_controller(
     return TextEncryptResponse(
         message_id=result["message_id"],
         salt_b64=base64.b64encode(result["salt"]).decode("ascii"),
-        morse=result["morse"],
-        symbols=result["symbols"],
         frame_count=result["frame_count"],
         base_image_shape=result["base_image_shape"],
         previews=previews,
@@ -121,8 +119,6 @@ async def encrypt_basic_energy_controller(
     return BasicEnergyEncryptResponse(
         message_id=result["message_id"],
         salt_b64=result["salt_b64"],
-        morse=result["morse"],
-        symbols=result["symbols"],
         frame_count=result["frame_count"],
         base_image_shape=result["base_image_shape"],
         thresholds=result["thresholds"],

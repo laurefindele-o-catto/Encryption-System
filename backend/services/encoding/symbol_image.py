@@ -107,3 +107,15 @@ def read_differential_brightness(
     bit2 = 1 if image[c_rows, c_cols].mean() > image[d_rows, d_cols].mean() else -1
 
     return BITS_TO_STATE[(bit1, bit2)]
+
+
+def differential_brightness_metrics(image: np.ndarray) -> dict[str, float]:
+    """Return the two signed block-pair differences used by the decoder."""
+    a_rows, a_cols = _block_slice(BLOCK_A_COORDS)
+    b_rows, b_cols = _block_slice(BLOCK_B_COORDS)
+    c_rows, c_cols = _block_slice(BLOCK_C_COORDS)
+    d_rows, d_cols = _block_slice(BLOCK_D_COORDS)
+    return {
+        "block_a_minus_b": float(image[a_rows, a_cols].mean() - image[b_rows, b_cols].mean()),
+        "block_c_minus_d": float(image[c_rows, c_cols].mean() - image[d_rows, d_cols].mean()),
+    }

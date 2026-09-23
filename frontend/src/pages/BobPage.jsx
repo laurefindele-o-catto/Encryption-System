@@ -15,6 +15,10 @@ export default function BobPage({
   const [decryptedText, setDecryptedText] = useState(null);
   const [decryptedMorse, setDecryptedMorse] = useState(null);
   const [decryptedSuccess, setDecryptedSuccess] = useState(null);
+  const [decryptionFrames, setDecryptionFrames] = useState([]);
+  const [decryptionStages, setDecryptionStages] = useState([]);
+  const [showDecryptionStages, setShowDecryptionStages] = useState(false);
+  const [decryptionStageIndex, setDecryptionStageIndex] = useState(0);
   const [packageSeen, setPackageSeen] = useState(false);
   const [imageVisible, setImageVisible] = useState(false);
   const [lightboxImage, setLightboxImage] = useState(null);
@@ -22,7 +26,11 @@ export default function BobPage({
   const [outputView, setOutputView] = useState("recovered");
   const [decryptionMethod, setDecryptionMethod] = useState(null);
   const [predictedEnergies, setPredictedEnergies] = useState(null);
+  const [predictedFrames, setPredictedFrames] = useState([]);
+  const [predictedThresholds, setPredictedThresholds] = useState([]);
   const [extractHovered, setExtractHovered] = useState(false);
+  const [showFrameInspector, setShowFrameInspector] = useState(false);
+  const [showEnergyInspector, setShowEnergyInspector] = useState(false);
 
   const isBasicEnergyPacket = packet?.messageType === "basic_energy_morse";
   const isTextPacket = packet?.messageType === "text" || isBasicEnergyPacket;
@@ -44,9 +52,17 @@ export default function BobPage({
     setDecryptedText(null);
     setDecryptedMorse(null);
     setDecryptedSuccess(null);
+    setDecryptionFrames([]);
+    setDecryptionStages([]);
+    setShowDecryptionStages(false);
+    setDecryptionStageIndex(0);
     setDecryptionMethod(null);
     setPredictedEnergies(null);
+    setPredictedFrames([]);
+    setPredictedThresholds([]);
     setOutputView("recovered");
+    setShowFrameInspector(false);
+    setShowEnergyInspector(false);
   }, [packet?.messageId]);
 
   const previousFrame = () => {
@@ -88,6 +104,7 @@ export default function BobPage({
         setDecryptedText(res.data.text);
         setDecryptedMorse(res.data.morse);
         setDecryptedSuccess(res.data.success);
+        setDecryptionFrames(res.data.frames || []);
         setDecryptionMethod("normal");
         setImageVisible(true);
 
@@ -113,6 +130,7 @@ export default function BobPage({
         setDecryptedText(res.data.text);
         setDecryptedMorse(res.data.morse);
         setDecryptedSuccess(res.data.success);
+        setDecryptionFrames(res.data.frames || []);
         setDecryptionMethod("normal");
         setImageVisible(true);
 
@@ -136,6 +154,9 @@ export default function BobPage({
 
         const res = await api.post("/decrypt-with-key-images", form);
         setDecryptedImage(res.data.image);
+        setDecryptionStages(res.data.stages || []);
+        setDecryptionStageIndex(0);
+        setShowDecryptionStages(false);
         setDecryptionMethod("normal");
         setOutputView("recovered");
         setImageVisible(true);
@@ -181,6 +202,8 @@ export default function BobPage({
       setDecryptedSuccess(res.data.success);
       setDecryptionMethod("energy_prediction");
       setPredictedEnergies(res.data.frame_energies || []);
+      setPredictedFrames(res.data.frames || []);
+      setPredictedThresholds(res.data.thresholds || []);
       setImageVisible(true);
 
       if (res.data.success) {
@@ -381,6 +404,25 @@ export default function BobPage({
         <div style={{ marginTop: 18, color: "#dff9ea", minHeight: 22 }}>
           {status}
         </div>
+
+        {!isTextPacket && decryptionStages.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowDecryptionStages((visible) => !visible)}
+            style={processToggleStyle}
+          >
+            {showDecryptionStages ? "Hide Pulling back the curtain" : "Pulling back the curtain"}
+          </button>
+        )}
+
+        {showDecryptionStages && decryptionStages.length > 0 && (
+          <ProcessStageViewer
+            stages={decryptionStages}
+            index={decryptionStageIndex}
+            onChange={setDecryptionStageIndex}
+            kicker="Decryption sequence"
+          />
+        )}
       </div>
 
       <div
@@ -736,6 +778,15 @@ export default function BobPage({
                 textAlign: "center",
               }}
             />
+            {decryptionFrames.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowFrameInspector(true)}
+                style={inspectFrameButtonStyle}
+              >
+                Inspect frame diagnostics
+              </button>
+            )}
           </div>
         )}
 
@@ -757,6 +808,19 @@ export default function BobPage({
           </div>
         </div>
       </div>
+
+      {showFrameInspector && decryptionFrames.length > 0 && (
+        <FrameInspector
+          frame={decryptionFrames[frameIndex]}
+          frameImage={currentFrameImage}
+          frameIndex={frameIndex}
+          frameCount={decryptionFrames.length}
+          isBasicEnergyPacket={isBasicEnergyPacket}
+          onPrevious={previousFrame}
+          onNext={nextFrame}
+          onClose={() => setShowFrameInspector(false)}
+        />
+      )}
 
       {lightboxImage && (
         <div
@@ -791,6 +855,271 @@ export default function BobPage({
     </div>
   );
 }
+
+function ProcessStageViewer({ stages, index, onChange, kicker }) {
+  const stage = stages[index];
+  if (!stage) return null;
+
+  return (
+    <div style={processViewerStyle}>
+      <div style={processHeaderStyle}>
+        <span style={processKickerStyle}>{kicker}</span>
+        <span style={processCounterStyle}>{index + 1} / {stages.length}</span>
+      </div>
+      <div style={{ color: "#f4f8ff", fontWeight: 700, marginBottom: 10 }}>{formatStageName(stage.name)}</div>
+      <img
+        src={`data:image/png;base64,${stage.image}`}
+        alt={formatStageName(stage.name)}
+        style={{ width: "100%", maxHeight: 240, objectFit: "contain", borderRadius: 10, background: "rgba(0,0,0,0.35)" }}
+      />
+      <input
+        type="range"
+        min="0"
+        max={stages.length - 1}
+        value={index}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label="Decryption stage"
+        style={{ width: "100%", marginTop: 12, accentColor: "#e7edf5" }}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
+        <button type="button" onClick={() => onChange(Math.max(0, index - 1))} disabled={index === 0} style={processButtonStyle}>Previous</button>
+        <button type="button" onClick={() => onChange(Math.min(stages.length - 1, index + 1))} disabled={index === stages.length - 1} style={processButtonStyle}>Next</button>
+      </div>
+    </div>
+  );
+}
+
+function formatStageName(name) {
+  return name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatNumber(value) {
+  return typeof value === "number" ? value.toFixed(2) : "-";
+}
+
+function FrameInspector({
+  frame,
+  frameImage,
+  frameIndex,
+  frameCount,
+  isBasicEnergyPacket,
+  onPrevious,
+  onNext,
+  onClose,
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Frame diagnostics"
+      onClick={onClose}
+      style={frameInspectorOverlayStyle}
+    >
+      <div onClick={(event) => event.stopPropagation()} style={frameInspectorBoxStyle}>
+        <div style={processHeaderStyle}>
+          <div>
+            <div style={processKickerStyle}>Frame diagnostics</div>
+            <div style={{ color: "#f4f8ff", fontWeight: 700, marginTop: 4 }}>
+              Frame {frameIndex + 1} / {frameCount}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close frame diagnostics" style={closeInspectorButtonStyle}>
+            &times;
+          </button>
+        </div>
+
+        {frameImage && (
+          <img
+            src={`data:image/png;base64,${frameImage}`}
+            alt={`Encrypted frame ${frameIndex + 1}`}
+            style={frameInspectorImageStyle}
+          />
+        )}
+
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <button type="button" onClick={onPrevious} disabled={frameIndex === 0} style={frameButtonStyle}>
+            &#8592;
+          </button>
+          <input
+            type="range"
+            min="0"
+            max={frameCount - 1}
+            value={frameIndex}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (next < frameIndex) onPrevious();
+              if (next > frameIndex) onNext();
+            }}
+            aria-label="Frame diagnostics index"
+            style={{ flex: 1, accentColor: "#f4f8ff" }}
+          />
+          <button type="button" onClick={onNext} disabled={frameIndex === frameCount - 1} style={frameButtonStyle}>
+            &#8594;
+          </button>
+        </div>
+
+        <div style={diagnosticsPanelStyle}>
+          <div style={diagnosticLabelStyle}>Recovered Morse symbol</div>
+          <div style={{ color: "#ffffff", fontSize: 20, fontFamily: "monospace", marginTop: 4 }}>
+            {frame?.symbol_name || "-"}
+          </div>
+          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            {isBasicEnergyPacket ? (
+              <>
+                <div style={diagnosticRowStyle}><span>Mean brightness</span><strong>{formatNumber(frame?.mean_brightness)}</strong></div>
+                <div style={diagnosticRowStyle}><span>Brightness delta</span><strong>{formatNumber(frame?.brightness_delta)}</strong></div>
+                <div style={diagnosticRowStyle}><span>Total energy</span><strong>{formatNumber(frame?.total_energy)}</strong></div>
+              </>
+            ) : (
+              <>
+                <div style={diagnosticRowStyle}><span>A-B difference</span><strong>{formatNumber(frame?.block_a_minus_b)}</strong></div>
+                <div style={diagnosticRowStyle}><span>C-D difference</span><strong>{formatNumber(frame?.block_c_minus_d)}</strong></div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const processToggleStyle = {
+  width: "100%",
+  marginTop: 12,
+  padding: "10px 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(255,255,255,0.06)",
+  color: "#e7edf5",
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+const processViewerStyle = {
+  marginTop: 12,
+  padding: 14,
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.035)",
+};
+
+const diagnosticsPanelStyle = {
+  marginTop: 16,
+  padding: 14,
+  borderRadius: 12,
+  border: "1px solid rgba(142, 197, 255, 0.18)",
+  background: "rgba(142, 197, 255, 0.045)",
+};
+
+const inspectFrameButtonStyle = {
+  width: "100%",
+  marginTop: 10,
+  padding: "9px 12px",
+  borderRadius: 9,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(255,255,255,0.06)",
+  color: "#e7edf5",
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+const frameInspectorOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 20,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  background: "rgba(0,0,0,0.72)",
+};
+
+const frameInspectorBoxStyle = {
+  width: "min(560px, 94vw)",
+  maxHeight: "90vh",
+  overflowY: "auto",
+  padding: 20,
+  borderRadius: 16,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "linear-gradient(145deg, rgba(25,32,44,0.98), rgba(9,13,20,0.98))",
+  boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 24px rgba(190,215,255,0.12)",
+};
+
+const frameInspectorImageStyle = {
+  display: "block",
+  width: "100%",
+  maxHeight: 330,
+  objectFit: "contain",
+  borderRadius: 10,
+  background: "rgba(0,0,0,0.35)",
+};
+
+const closeInspectorButtonStyle = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(255,255,255,0.08)",
+  color: "#f4f8ff",
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+const diagnosticLabelStyle = {
+  color: "#8ec5ff",
+  fontSize: 10,
+  letterSpacing: 1,
+  textTransform: "uppercase",
+};
+
+const diagnosticValueStyle = {
+  color: "#f4f8ff",
+  fontFamily: "monospace",
+  wordBreak: "break-all",
+  marginTop: 4,
+};
+
+const diagnosticRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  color: "#dceaf7",
+  fontSize: 12,
+  fontFamily: "monospace",
+  padding: "7px 8px",
+  borderRadius: 7,
+  background: "rgba(0,0,0,0.22)",
+};
+
+const processHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 10,
+};
+
+const processKickerStyle = {
+  color: "#aebbd0",
+  fontSize: 11,
+  letterSpacing: 1.4,
+  textTransform: "uppercase",
+};
+
+const processCounterStyle = {
+  color: "#f4f8ff",
+  fontSize: 13,
+  fontVariantNumeric: "tabular-nums",
+};
+
+const processButtonStyle = {
+  border: "1px solid rgba(255,255,255,0.16)",
+  borderRadius: 8,
+  background: "rgba(255,255,255,0.07)",
+  color: "#f4f8ff",
+  padding: "7px 12px",
+  cursor: "pointer",
+};
 
 const frameButtonStyle = {
   width: 36,

@@ -63,6 +63,7 @@ def drpe_encrypt(
     cover_image: np.ndarray,
     p1_material: bytes,
     p2_material: bytes,
+    include_stages: bool = False,
 ) -> dict:
     """
     Returns:
@@ -87,12 +88,23 @@ def drpe_encrypt(
     # 4. 2D Inverse Fourier transform back to spatial domain -> complex ciphertext c
     c = np.fft.ifft2(g_prime, axes=(0, 1))
 
-    return {
+    result = {
         "complex": c.astype(np.complex128),
         "amplitude": np.abs(c).astype(np.float64),
         "p1": p1,
         "p2": p2,
     }
+
+    if include_stages:
+        result["stages"] = {
+            "original": cover_image,
+            "spatial_rotation": np.abs(cover_spatial),
+            "frequency_spectrum": _magnitude_preview(g),
+            "frequency_rotation": _magnitude_preview(g_prime),
+            "ciphertext": np.abs(c),
+        }
+
+    return result
 
 
 def drpe_decrypt(
@@ -124,6 +136,37 @@ def drpe_decrypt(
     cover = cover_spatial * np.exp(-1j * p1)
 
     return np.clip(np.round(cover.real), 0, 255)
+
+
+def drpe_decrypt_with_stages(
+    ciphertext_complex: np.ndarray,
+    p1: np.ndarray,
+    p2: np.ndarray,
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Decrypt while retaining five displayable reverse-process stages."""
+    g_prime = np.fft.fft2(ciphertext_complex, axes=(0, 1))
+    g = g_prime * np.exp(-1j * p2)
+    cover_spatial = np.fft.ifft2(g, axes=(0, 1))
+    cover = cover_spatial * np.exp(-1j * p1)
+    recovered = np.clip(np.round(cover.real), 0, 255)
+
+    stages = {
+        "ciphertext": np.abs(ciphertext_complex),
+        "frequency_spectrum": _magnitude_preview(g_prime),
+        "frequency_phase_removed": _magnitude_preview(g),
+        "spatial_phase_removed": np.abs(cover_spatial),
+        "recovered": recovered,
+    }
+    return recovered, stages
+
+
+def _magnitude_preview(values: np.ndarray) -> np.ndarray:
+    """Log-normalize complex magnitude for a visible spectrum preview."""
+    magnitude = np.log1p(np.abs(values))
+    maximum = float(np.max(magnitude))
+    if maximum <= 0.0:
+        return np.zeros_like(magnitude, dtype=np.float64)
+    return magnitude / maximum * 255.0
 
 
 def energy(image: np.ndarray) -> float:
