@@ -39,3 +39,8 @@ BLOCK_D_COORDS = (50, 50)
 BLOCK_SIZE = 16
 # Brightness delta applied to each block (net change across both blocks = 0).
 DELTA = 8
+
+# Designated block coordinates and size for basic Morse modulation
+BASIC_BLOCK_COORDS = BLOCK_A_COORDS
+BASIC_BLOCK_SIZE = BLOCK_SIZE
+

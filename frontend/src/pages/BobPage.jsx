@@ -197,12 +197,14 @@ export default function BobPage({
       form.append("message_id", packet.messageId || "");
 
       const res = await api.post("/text/basic-energy/predict", form);
+      const frames = res.data.frames || [];
       setDecryptedText(res.data.predicted_text);
       setDecryptedMorse(res.data.predicted_morse);
       setDecryptedSuccess(res.data.success);
       setDecryptionMethod("energy_prediction");
       setPredictedEnergies(res.data.frame_energies || []);
-      setPredictedFrames(res.data.frames || []);
+      setPredictedFrames(frames);
+      setDecryptionFrames(frames);
       setPredictedThresholds(res.data.thresholds || []);
       setImageVisible(true);
 
@@ -411,7 +413,9 @@ export default function BobPage({
             onClick={() => setShowDecryptionStages((visible) => !visible)}
             style={processToggleStyle}
           >
-            {showDecryptionStages ? "Hide Pulling back the curtain" : "Pulling back the curtain"}
+            {showDecryptionStages
+              ? "Hide Pulling back the curtain"
+              : "Pulling back the curtain"}
           </button>
         )}
 
@@ -673,6 +677,31 @@ export default function BobPage({
                 {decryptedMorse || "—"}
               </div>
             </div>
+
+            {decryptionFrames.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowFrameInspector(true)}
+                style={{
+                  ...inspectFrameButtonStyle,
+                  marginTop: 14,
+                  background:
+                    decryptionMethod === "energy_prediction"
+                      ? "rgba(255, 209, 102, 0.12)"
+                      : "rgba(160, 235, 186, 0.12)",
+                  border:
+                    decryptionMethod === "energy_prediction"
+                      ? "1px solid rgba(255, 209, 102, 0.35)"
+                      : "1px solid rgba(160, 235, 186, 0.35)",
+                  color:
+                    decryptionMethod === "energy_prediction"
+                      ? "#ffd166"
+                      : "#a0ebba",
+                }}
+              >
+                Inspect frame diagnostics ({decryptionFrames.length} frames)
+              </button>
+            )}
           </div>
         )}
 
@@ -816,8 +845,10 @@ export default function BobPage({
           frameIndex={frameIndex}
           frameCount={decryptionFrames.length}
           isBasicEnergyPacket={isBasicEnergyPacket}
+          decryptionMethod={decryptionMethod}
           onPrevious={previousFrame}
           onNext={nextFrame}
+          onSelectFrame={setFrameIndex}
           onClose={() => setShowFrameInspector(false)}
         />
       )}
@@ -864,13 +895,23 @@ function ProcessStageViewer({ stages, index, onChange, kicker }) {
     <div style={processViewerStyle}>
       <div style={processHeaderStyle}>
         <span style={processKickerStyle}>{kicker}</span>
-        <span style={processCounterStyle}>{index + 1} / {stages.length}</span>
+        <span style={processCounterStyle}>
+          {index + 1} / {stages.length}
+        </span>
       </div>
-      <div style={{ color: "#f4f8ff", fontWeight: 700, marginBottom: 10 }}>{formatStageName(stage.name)}</div>
+      <div style={{ color: "#f4f8ff", fontWeight: 700, marginBottom: 10 }}>
+        {formatStageName(stage.name)}
+      </div>
       <img
         src={`data:image/png;base64,${stage.image}`}
         alt={formatStageName(stage.name)}
-        style={{ width: "100%", maxHeight: 240, objectFit: "contain", borderRadius: 10, background: "rgba(0,0,0,0.35)" }}
+        style={{
+          width: "100%",
+          maxHeight: 240,
+          objectFit: "contain",
+          borderRadius: 10,
+          background: "rgba(0,0,0,0.35)",
+        }}
       />
       <input
         type="range"
@@ -881,16 +922,39 @@ function ProcessStageViewer({ stages, index, onChange, kicker }) {
         aria-label="Decryption stage"
         style={{ width: "100%", marginTop: 12, accentColor: "#e7edf5" }}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
-        <button type="button" onClick={() => onChange(Math.max(0, index - 1))} disabled={index === 0} style={processButtonStyle}>Previous</button>
-        <button type="button" onClick={() => onChange(Math.min(stages.length - 1, index + 1))} disabled={index === stages.length - 1} style={processButtonStyle}>Next</button>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          marginTop: 8,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, index - 1))}
+          disabled={index === 0}
+          style={processButtonStyle}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(stages.length - 1, index + 1))}
+          disabled={index === stages.length - 1}
+          style={processButtonStyle}
+        >
+          Next
+        </button>
       </div>
     </div>
   );
 }
 
 function formatStageName(name) {
-  return name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return name
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatNumber(value) {
@@ -903,10 +967,14 @@ function FrameInspector({
   frameIndex,
   frameCount,
   isBasicEnergyPacket,
+  decryptionMethod,
   onPrevious,
   onNext,
+  onSelectFrame,
   onClose,
 }) {
+  const isEnergyPrediction = decryptionMethod === "energy_prediction";
+
   return (
     <div
       role="dialog"
@@ -915,15 +983,27 @@ function FrameInspector({
       onClick={onClose}
       style={frameInspectorOverlayStyle}
     >
-      <div onClick={(event) => event.stopPropagation()} style={frameInspectorBoxStyle}>
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={frameInspectorBoxStyle}
+      >
         <div style={processHeaderStyle}>
           <div>
-            <div style={processKickerStyle}>Frame diagnostics</div>
+            <div style={processKickerStyle}>
+              {isEnergyPrediction
+                ? "Energy side-channel diagnostics"
+                : "Frame diagnostics"}
+            </div>
             <div style={{ color: "#f4f8ff", fontWeight: 700, marginTop: 4 }}>
               Frame {frameIndex + 1} / {frameCount}
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close frame diagnostics" style={closeInspectorButtonStyle}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close frame diagnostics"
+            style={closeInspectorButtonStyle}
+          >
             &times;
           </button>
         </div>
@@ -936,8 +1016,21 @@ function FrameInspector({
           />
         )}
 
-        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <button type="button" onClick={onPrevious} disabled={frameIndex === 0} style={frameButtonStyle}>
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onPrevious}
+            disabled={frameIndex === 0}
+            style={frameButtonStyle}
+          >
             &#8592;
           </button>
           <input
@@ -947,33 +1040,131 @@ function FrameInspector({
             value={frameIndex}
             onChange={(event) => {
               const next = Number(event.target.value);
-              if (next < frameIndex) onPrevious();
-              if (next > frameIndex) onNext();
+              if (onSelectFrame) {
+                onSelectFrame(next);
+              } else {
+                if (next < frameIndex) onPrevious();
+                if (next > frameIndex) onNext();
+              }
             }}
             aria-label="Frame diagnostics index"
             style={{ flex: 1, accentColor: "#f4f8ff" }}
           />
-          <button type="button" onClick={onNext} disabled={frameIndex === frameCount - 1} style={frameButtonStyle}>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={frameIndex === frameCount - 1}
+            style={frameButtonStyle}
+          >
             &#8594;
           </button>
         </div>
 
         <div style={diagnosticsPanelStyle}>
-          <div style={diagnosticLabelStyle}>Recovered Morse symbol</div>
-          <div style={{ color: "#ffffff", fontSize: 20, fontFamily: "monospace", marginTop: 4 }}>
-            {frame?.symbol_name || "-"}
+          <div style={diagnosticLabelStyle}>
+            {isEnergyPrediction
+              ? "Predicted Morse symbol (via Total Energy)"
+              : "Recovered Morse symbol"}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginTop: 4,
+            }}
+          >
+            <span
+              style={{
+                color: "#ffffff",
+                fontSize: 20,
+                fontFamily: "monospace",
+                fontWeight: 700,
+              }}
+            >
+              {frame?.symbol_name || "-"}
+            </span>
+            {(frame?.symbol != null || frame?.predicted_symbol != null) && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: "monospace",
+                  color: isEnergyPrediction ? "#ffd166" : "#8ec5ff",
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  background: isEnergyPrediction
+                    ? "rgba(255, 209, 102, 0.15)"
+                    : "rgba(142, 197, 255, 0.15)",
+                  border: isEnergyPrediction
+                    ? "1px solid rgba(255, 209, 102, 0.35)"
+                    : "1px solid rgba(142, 197, 255, 0.3)",
+                }}
+              >
+                State {frame?.symbol ?? frame?.predicted_symbol}
+              </span>
+            )}
           </div>
           <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
             {isBasicEnergyPacket ? (
-              <>
-                <div style={diagnosticRowStyle}><span>Mean brightness</span><strong>{formatNumber(frame?.mean_brightness)}</strong></div>
-                <div style={diagnosticRowStyle}><span>Brightness delta</span><strong>{formatNumber(frame?.brightness_delta)}</strong></div>
-                <div style={diagnosticRowStyle}><span>Total energy</span><strong>{formatNumber(frame?.total_energy)}</strong></div>
-              </>
+              isEnergyPrediction ? (
+                <>
+                  <div style={diagnosticRowStyle}>
+                    <span>Total Parseval energy</span>
+                    <strong>
+                      {formatNumber(frame?.total_energy ?? frame?.energy)}
+                    </strong>
+                  </div>
+                  {frame?.expected_energy != null && (
+                    <div style={diagnosticRowStyle}>
+                      <span>Expected level energy</span>
+                      <strong>{formatNumber(frame?.expected_energy)}</strong>
+                    </div>
+                  )}
+                  {frame?.energy_deviation != null && (
+                    <div style={diagnosticRowStyle}>
+                      <span>Energy deviation</span>
+                      <strong>{formatNumber(frame?.energy_deviation)}</strong>
+                    </div>
+                  )}
+                  {frame?.decision_threshold && (
+                    <div style={diagnosticRowStyle}>
+                      <span>Threshold interval</span>
+                      <strong>{frame.decision_threshold}</strong>
+                    </div>
+                  )}
+                  <div style={diagnosticRowStyle}>
+                    <span>Extraction mode</span>
+                    <strong style={{ color: "#ffd166" }}>
+                      Zero Decryption (Parseval)
+                    </strong>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={diagnosticRowStyle}>
+                    <span>Mean brightness</span>
+                    <strong>{formatNumber(frame?.mean_brightness)}</strong>
+                  </div>
+                  <div style={diagnosticRowStyle}>
+                    <span>Brightness delta</span>
+                    <strong>{formatNumber(frame?.brightness_delta)}</strong>
+                  </div>
+                  <div style={diagnosticRowStyle}>
+                    <span>Total energy</span>
+                    <strong>{formatNumber(frame?.total_energy)}</strong>
+                  </div>
+                </>
+              )
             ) : (
               <>
-                <div style={diagnosticRowStyle}><span>A-B difference</span><strong>{formatNumber(frame?.block_a_minus_b)}</strong></div>
-                <div style={diagnosticRowStyle}><span>C-D difference</span><strong>{formatNumber(frame?.block_c_minus_d)}</strong></div>
+                <div style={diagnosticRowStyle}>
+                  <span>A-B difference</span>
+                  <strong>{formatNumber(frame?.block_a_minus_b)}</strong>
+                </div>
+                <div style={diagnosticRowStyle}>
+                  <span>C-D difference</span>
+                  <strong>{formatNumber(frame?.block_c_minus_d)}</strong>
+                </div>
               </>
             )}
           </div>
@@ -1041,7 +1232,8 @@ const frameInspectorBoxStyle = {
   padding: 20,
   borderRadius: 16,
   border: "1px solid rgba(255,255,255,0.18)",
-  background: "linear-gradient(145deg, rgba(25,32,44,0.98), rgba(9,13,20,0.98))",
+  background:
+    "linear-gradient(145deg, rgba(25,32,44,0.98), rgba(9,13,20,0.98))",
   boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 24px rgba(190,215,255,0.12)",
 };
 

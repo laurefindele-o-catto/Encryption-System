@@ -47,6 +47,8 @@ class TextEncryptResponse(BaseModel):
     salt_b64: str
     frame_count: int
     base_image_shape: list[int]
+    morse: str | None = None
+    symbols: list[int] = []
     previews: list[TextFramePreview] = []
 
 
@@ -84,6 +86,8 @@ class BasicEnergyEncryptResponse(BaseModel):
     salt_b64: str
     frame_count: int
     base_image_shape: list[int]
+    morse: str | None = None
+    symbols: list[int] = []
     thresholds: list[float] = []
     energy_levels: list[float] = []
     previews: list[BasicEnergyFramePreview] = []
@@ -117,6 +121,11 @@ class BasicEnergyPredictedFrame(BaseModel):
     energy: float
     predicted_symbol: int
     symbol_name: str
+    total_energy: float | None = None
+    symbol: int | None = None
+    expected_energy: float | None = None
+    energy_deviation: float | None = None
+    decision_threshold: str | None = None
 
 
 class BasicEnergyPredictResponse(BaseModel):

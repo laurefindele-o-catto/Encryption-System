@@ -17,7 +17,7 @@ from PIL import Image
 from fastapi.testclient import TestClient
 
 from main import app
-from services.drpe import drpe_decrypt, drpe_encrypt, energy
+from services.drpe import drpe_decrypt, drpe_decrypt_with_stages, drpe_encrypt, energy
 from services.keys import derive_key
 
 
@@ -197,5 +197,83 @@ def test_variable_size_image_encryption():
     )
     assert dec_res.status_code == 200
     assert dec_res.json()["match_with_cover"] is True
+
+
+def test_rgb_stage_differentiation_encryption():
+    """Verify Alice's stages 1-2 and 3-4 differ visually and mathematically."""
+    rng = np.random.default_rng(42)
+    cover = rng.uniform(20.0, 240.0, size=(64, 64, 3))
+
+    p1_mat = b"test-diff-p1"
+    p2_mat = b"test-diff-p2"
+    enc = drpe_encrypt(cover, p1_mat, p2_mat, include_stages=True)
+    stages = enc["stages"]
+
+    # 1. Stage 1 and Stage 2 have non-zero visual difference
+    assert np.any(stages["original"] != stages["spatial_rotation"])
+    assert np.max(np.abs(stages["original"] - stages["spatial_rotation"])) > 5.0
+
+    # 2. Stage 3 and Stage 4 have non-zero visual difference
+    assert np.any(stages["frequency_spectrum"] != stages["frequency_rotation"])
+    assert np.max(np.abs(stages["frequency_spectrum"] - stages["frequency_rotation"])) > 5.0
+
+
+def test_rgb_stage_differentiation_decryption():
+    """Verify Bob's stages 2-3 and 4-5 differ visually and mathematically."""
+    rng = np.random.default_rng(42)
+    cover = np.round(rng.uniform(20.0, 240.0, size=(64, 64, 3)))
+
+    p1_mat = b"test-diff-p1"
+    p2_mat = b"test-diff-p2"
+    enc = drpe_encrypt(cover, p1_mat, p2_mat, include_stages=True)
+
+    recovered, stages = drpe_decrypt_with_stages(enc["complex"], p1=enc["p1"], p2=enc["p2"])
+
+    # 1. Decryption fidelity is 100% bit-exact
+    assert np.allclose(recovered, cover, atol=1e-15)
+
+    # 2. Stage 2 and Stage 3 differ visually
+    assert np.any(stages["frequency_spectrum"] != stages["frequency_phase_removed"])
+    assert np.max(np.abs(stages["frequency_spectrum"] - stages["frequency_phase_removed"])) > 5.0
+
+    # 3. Stage 4 and Stage 5 differ visually
+    assert np.any(stages["spatial_phase_removed"] != stages["recovered"])
+    assert np.max(np.abs(stages["spatial_phase_removed"] - stages["recovered"])) > 5.0
+
+
+def test_api_stages_payload():
+    """Verify API returns stages with distinct previews."""
+    rng = np.random.default_rng(42)
+    pixels = rng.integers(0, 256, size=(64, 64, 3), dtype=np.uint8)
+    img = Image.fromarray(pixels, mode="RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
+    key_img = Image.new("RGB", (64, 64), color=(30, 60, 90))
+    key_buf = io.BytesIO()
+    key_img.save(key_buf, format="PNG")
+    key_buf.seek(0)
+
+    res = client.post(
+        "/api/encrypt",
+        data={"secret_password": "stage-test-password"},
+        files={
+            "cover_image": ("test.png", buf, "image/png"),
+            "secret_key_image": ("key.png", key_buf, "image/png"),
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "stages" in data
+    assert len(data["stages"]) == 5
+
+    stage_names = [s["name"] for s in data["stages"]]
+    assert stage_names == ["original", "spatial_rotation", "frequency_spectrum", "frequency_rotation", "ciphertext"]
+    for s in data["stages"]:
+        assert "image" in s
+        assert len(s["image"]) > 0
+
+
 
 
