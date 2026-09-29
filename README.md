@@ -172,12 +172,12 @@ To prevent energy leakage, `backend/services/encoding/symbol_image.py` implement
 
 Each symbol maps to a 2-bit sign pattern $(\mathrm{bit}_1, \mathrm{bit}_2)$ with a fixed delta $\Delta = 8$:
 
-| Symbol           | Sign pattern |    Pair 1 (A, B)     |    Pair 2 (C, D)     |
-| :--------------- | :----------: | :------------------: | :------------------: |
-| `DOT` (0)        |  $(+1, +1)$  | $(+\Delta, -\Delta)$ | $(+\Delta, -\Delta)$ |
-| `DASH` (1)       |  $(+1, -1)$  | $(+\Delta, -\Delta)$ | $(-\Delta, +\Delta)$ |
-| `LETTER_GAP` (2) |  $(-1, +1)$  | $(-\Delta, +\Delta)$ | $(+\Delta, -\Delta)$ |
-| `WORD_GAP` (3)   |  $(-1, -1)$  | $(-\Delta, +\Delta)$ | $(-\Delta, +\Delta)$ |
+| Symbol           | Sign pattern | Pair 1 (A, B) | Pair 2 (C, D) |
+| :--------------- | :----------: | :-----------: | :-----------: |
+| `DOT` (0)        |   (+1, +1)   |   (+Δ, -Δ)    |   (+Δ, -Δ)    |
+| `DASH` (1)       |   (+1, -1)   |   (+Δ, -Δ)    |   (-Δ, +Δ)    |
+| `LETTER_GAP` (2) |   (-1, +1)   |   (-Δ, +Δ)    |   (+Δ, -Δ)    |
+| `WORD_GAP` (3)   |   (-1, -1)   |   (-Δ, +Δ)    |   (-Δ, +Δ)    |
 
 **Cancellation.** Every pair adds $+\Delta$ to one block and $-\Delta$ to the other, so the net brightness change is zero for every symbol:
 
